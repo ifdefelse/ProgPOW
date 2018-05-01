@@ -5,8 +5,7 @@
 
 #include "CLMiner.h"
 #include <libethash/internal.h>
-#include "CLMiner_kernel_stable.h"
-#include "CLMiner_kernel_experimental.h"
+#include "CLMiner_kernel.h"
 
 using namespace dev;
 using namespace eth;
@@ -595,39 +594,24 @@ bool CLMiner::init(int epoch)
 		if (m_globalWorkSize % m_workgroupSize != 0)
 			m_globalWorkSize = ((m_globalWorkSize / m_workgroupSize) + 1) * m_workgroupSize;
 
-		uint64_t dagSize = ethash_get_datasize(light->light->block_number);
-		uint32_t dagSize128 = (unsigned)(dagSize / ETHASH_MIX_BYTES);
-		uint32_t lightSize64 = (unsigned)(light->data().size() / sizeof(node));
+		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
+		uint32_t dagWords = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+		uint32_t lightWords = (unsigned)(light->data().size() / sizeof(node));
 
 		// patch source code
 		// note: The kernels here are simply compiled version of the respective .cl kernels
 		// into a byte array by bin2h.cmake. There is no need to load the file by hand in runtime
 		// See libethash-cl/CMakeLists.txt: add_custom_command()
-		// TODO: Just use C++ raw string literal.
-		string code;
+        std::string code = ProgPow::getKern(light->light->block_number, ProgPow::KERNEL_CL);
+		code += string(CLMiner_kernel, sizeof(CLMiner_kernel));
 
-		if ( s_clKernelName == CLKernelName::Experimental ) {
-			cllog << "OpenCL kernel: Experimental kernel";
-			code = string(CLMiner_kernel_experimental, CLMiner_kernel_experimental + sizeof(CLMiner_kernel_experimental));
-		}
-		else { //if(s_clKernelName == CLKernelName::Stable)
-			cllog << "OpenCL kernel: Stable kernel";
-
-			//CLMiner_kernel_stable.cl will do a #undef THREADS_PER_HASH
-			if(s_threadsPerHash != 8) {
-				cwarn << "The current stable OpenCL kernel only supports exactly 8 threads. Thread parameter will be ignored.";
-			}
-
-			code = string(CLMiner_kernel_stable, CLMiner_kernel_stable + sizeof(CLMiner_kernel_stable));
-		}
 		addDefinition(code, "GROUP_SIZE", m_workgroupSize);
-		addDefinition(code, "DAG_SIZE", dagSize128);
-		addDefinition(code, "LIGHT_SIZE", lightSize64);
-		addDefinition(code, "ACCESSES", ETHASH_ACCESSES);
+		addDefinition(code, "PROGPOW_DAG_BYTES", dagBytes);
+		addDefinition(code, "PROGPOW_DAG_WORDS", dagWords);
+		addDefinition(code, "LIGHT_WORDS", lightWords);
 		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
 		addDefinition(code, "PLATFORM", platformId);
 		addDefinition(code, "COMPUTE", computeCapability);
-		addDefinition(code, "THREADS_PER_HASH", s_threadsPerHash);
 
 		// create miner OpenCL program
 		cl::Program::Sources sources{{code.data(), code.size()}};
@@ -646,12 +630,12 @@ bool CLMiner::init(int epoch)
 		//check whether the current dag fits in memory everytime we recreate the DAG
 		cl_ulong result = 0;
 		device.getInfo(CL_DEVICE_GLOBAL_MEM_SIZE, &result);
-		if (result < dagSize)
+		if (result < dagBytes)
 		{
 			cnote <<
 			"OpenCL device " << device.getInfo<CL_DEVICE_NAME>()
 							 << " has insufficient GPU memory." << result <<
-							 " bytes of memory found < " << dagSize << " bytes of memory required";	
+							 " bytes of memory found < " << dagBytes << " bytes of memory required";	
 			return false;
 		}
 
@@ -660,8 +644,8 @@ bool CLMiner::init(int epoch)
 		{
 			cllog << "Creating light cache buffer, size" << light->data().size();
 			m_light = cl::Buffer(m_context, CL_MEM_READ_ONLY, light->data().size());
-			cllog << "Creating DAG buffer, size" << dagSize;
-			m_dag = cl::Buffer(m_context, CL_MEM_READ_ONLY, dagSize);
+			cllog << "Creating DAG buffer, size" << dagBytes;
+			m_dag = cl::Buffer(m_context, CL_MEM_READ_ONLY, dagBytes);
 			cllog << "Loading kernels";
 			m_searchKernel = cl::Kernel(program, "ethash_search");
 			m_dagKernel = cl::Kernel(program, "ethash_calculate_dag_item");
@@ -685,7 +669,7 @@ bool CLMiner::init(int epoch)
 		ETHCL_LOG("Creating mining buffer");
 		m_searchBuffer = cl::Buffer(m_context, CL_MEM_WRITE_ONLY, (c_maxSearchResults + 1) * sizeof(uint32_t));
 
-		uint32_t const work = (uint32_t)(dagSize / sizeof(node));
+		uint32_t const work = (uint32_t)(dagBytes / sizeof(node));
 		uint32_t fullRuns = work / m_globalWorkSize;
 		uint32_t const restWork = work % m_globalWorkSize;
 		if (restWork > 0) fullRuns++;
@@ -704,7 +688,7 @@ bool CLMiner::init(int epoch)
 		auto endDAG = std::chrono::steady_clock::now();
 
 		auto dagTime = std::chrono::duration_cast<std::chrono::milliseconds>(endDAG-startDAG);
-		float gb = (float)dagSize / (1024 * 1024 * 1024);
+		float gb = (float)dagBytes / (1024 * 1024 * 1024);
 		cnote << gb << " GB of DAG data generated in" << dagTime.count() << "ms.";
 	}
 	catch (cl::Error const& err)

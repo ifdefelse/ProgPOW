@@ -19,6 +19,8 @@ along with cpp-ethereum.  If not, see <http://www.gnu.org/licenses/>.
 #undef max
 
 #include "CUDAMiner.h"
+#include "CUDAMiner_kernel.h"
+#include <nvrtc.h>
 
 using namespace std;
 using namespace dev;
@@ -110,8 +112,8 @@ void CUDAMiner::workLoop()
 			{
 				if(!w || w.header == h256())
 				{
-					cnote << "No work. Pause for 3 s.";
-					std::this_thread::sleep_for(std::chrono::seconds(3));
+					cnote << "No work.";
+					//std::this_thread::sleep_for(std::chrono::seconds(3));
 					continue;
 				}
 				if (current.epoch != w.epoch)
@@ -245,8 +247,8 @@ void CUDAMiner::setParallelHash(unsigned _parallelHash)
   	m_parallelHash = _parallelHash;
 }
 
-unsigned const CUDAMiner::c_defaultBlockSize = 128;
-unsigned const CUDAMiner::c_defaultGridSize = 8192; // * CL_DEFAULT_LOCAL_WORK_SIZE
+unsigned const CUDAMiner::c_defaultBlockSize = 512;
+unsigned const CUDAMiner::c_defaultGridSize = 1024; // * CL_DEFAULT_LOCAL_WORK_SIZE
 unsigned const CUDAMiner::c_defaultNumStreams = 2;
 
 bool CUDAMiner::cuda_configureGPU(
@@ -293,8 +295,15 @@ bool CUDAMiner::cuda_configureGPU(
 		}
 		return true;
 	}
-	catch (runtime_error)
+	catch (cuda_runtime_error const& _e)
 	{
+		cwarn << "Fatal GPU error: " << _e.what();
+		cwarn << "Terminating.";
+		exit(-1);
+	}
+	catch (std::runtime_error const& _e)
+	{
+		cwarn << "Error CUDA mining: " << _e.what();
 		if(s_exit)
 			exit(1);
 		return false;
@@ -312,7 +321,7 @@ bool CUDAMiner::cuda_init(
 	size_t numDevices,
 	ethash_light_t _light,
 	uint8_t const* _lightData,
-	uint64_t _lightSize,
+	uint64_t _lightBytes,
 	unsigned _deviceId,
 	bool _cpyToHost,
 	uint8_t* &hostDAG,
@@ -337,50 +346,50 @@ bool CUDAMiner::cuda_init(
 		m_search_buf = new volatile search_results *[s_numStreams];
 		m_streams = new cudaStream_t[s_numStreams];
 
-		uint64_t dagSize = ethash_get_datasize(_light->block_number);
-		uint32_t dagSize128   = (unsigned)(dagSize / ETHASH_MIX_BYTES);
-		uint32_t lightSize64 = (unsigned)(_lightSize / sizeof(node));
+		uint64_t dagBytes = ethash_get_datasize(_light->block_number);
+		uint32_t dagWords   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+		uint32_t lightWords = (unsigned)(_lightBytes / sizeof(node));
 
-		
-		
 		CUDA_SAFE_CALL(cudaSetDevice(m_device_num));
 		cudalog << "Set Device to current";
-		if(dagSize128 != m_dag_size || !m_dag)
+		if(dagWords != m_dag_words || !m_dag)
 		{
 			//Check whether the current device has sufficient memory every time we recreate the dag
-			if (device_props.totalGlobalMem < dagSize)
+			if (device_props.totalGlobalMem < dagBytes)
 			{
-				cudalog <<  "CUDA device " << string(device_props.name) << " has insufficient GPU memory." << device_props.totalGlobalMem << " bytes of memory found < " << dagSize << " bytes of memory required";
+				cudalog <<  "CUDA device " << string(device_props.name) << " has insufficient GPU memory." << device_props.totalGlobalMem << " bytes of memory found < " << dagBytes << " bytes of memory required";
 				return false;
 			}
 			//We need to reset the device and recreate the dag  
 			cudalog << "Resetting device";
 			CUDA_SAFE_CALL(cudaDeviceReset());
-			CUDA_SAFE_CALL(cudaSetDeviceFlags(s_scheduleFlag));
-			CUDA_SAFE_CALL(cudaDeviceSetCacheConfig(cudaFuncCachePreferL1));
+			CUdevice device;
+			CUcontext context;
+			cuDeviceGet(&device, m_device_num);
+			cuCtxCreate(&context, s_scheduleFlag, device);
 			//We need to reset the light and the Dag for the following code to reallocate
 			//since cudaDeviceReset() frees all previous allocated memory
 			m_light[m_device_num] = nullptr;
 			m_dag = nullptr; 
 		}
 		// create buffer for cache
-		hash128_t * dag = m_dag;
+		hash64_t * dag = m_dag;
 		hash64_t * light = m_light[m_device_num];
 
+		compileKernel(_light->block_number, dagWords);
+
 		if(!light){ 
-			cudalog << "Allocating light with size: " << _lightSize;
-			CUDA_SAFE_CALL(cudaMalloc(reinterpret_cast<void**>(&light), _lightSize));
+			cudalog << "Allocating light with size: " << _lightBytes;
+			CUDA_SAFE_CALL(cudaMalloc(reinterpret_cast<void**>(&light), _lightBytes));
 		}
 		// copy lightData to device
-		CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(light), _lightData, _lightSize, cudaMemcpyHostToDevice));
+		CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(light), _lightData, _lightBytes, cudaMemcpyHostToDevice));
 		m_light[m_device_num] = light;
 		
-		if(dagSize128 != m_dag_size || !dag) // create buffer for dag
-			CUDA_SAFE_CALL(cudaMalloc(reinterpret_cast<void**>(&dag), dagSize));
-			
-		set_constants(dag, dagSize128, light, lightSize64); //in ethash_cuda_miner_kernel.cu
+		if(dagWords != m_dag_words || !dag) // create buffer for dag
+			CUDA_SAFE_CALL(cudaMalloc(reinterpret_cast<void**>(&dag), dagBytes));
 		
-		if(dagSize128 != m_dag_size || !dag)
+		if(dagWords != m_dag_words || !dag)
 		{
 			// create mining buffers
 			cudalog << "Generating mining buffers";
@@ -398,15 +407,16 @@ bool CUDAMiner::cuda_init(
 			if (!hostDAG)
 			{
 				if((m_device_num == dagCreateDevice) || !_cpyToHost){ //if !cpyToHost -> All devices shall generate their DAG
-					cudalog << "Generating DAG for GPU #" << m_device_num << " with dagSize: " 
-							<< dagSize <<" gridSize: " << s_gridSize;
-					ethash_generate_dag(dagSize, s_gridSize, s_blockSize, m_streams[0], m_device_num);
+					cudalog << "Generating DAG for GPU #" << m_device_num <<
+							   " with dagBytes: " << dagBytes <<" gridSize: " << s_gridSize;
+					ethash_generate_dag(dag, dagBytes, light, lightWords, s_gridSize, s_blockSize, m_streams[0], m_device_num);
+					cudalog << "Finished DAG";
 
 					if (_cpyToHost)
 					{
-						uint8_t* memoryDAG = new uint8_t[dagSize];
+						uint8_t* memoryDAG = new uint8_t[dagBytes];
 						cudalog << "Copying DAG from GPU #" << m_device_num << " to host";
-						CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(memoryDAG), dag, dagSize, cudaMemcpyDeviceToHost));
+						CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(memoryDAG), dag, dagBytes, cudaMemcpyDeviceToHost));
 
 						hostDAG = memoryDAG;
 					}
@@ -421,20 +431,121 @@ bool CUDAMiner::cuda_init(
 cpyDag:
 				cudalog << "Copying DAG from host to GPU #" << m_device_num;
 				const void* hdag = (const void*)hostDAG;
-				CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(dag), hdag, dagSize, cudaMemcpyHostToDevice));
+				CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(dag), hdag, dagBytes, cudaMemcpyHostToDevice));
 			}
 		}
     
 		m_dag = dag;
-		m_dag_size = dagSize128;
+		m_dag_words = dagWords;
+
 		return true;
 	}
-	catch (runtime_error const&)
+	catch (cuda_runtime_error const& _e)
 	{
+		cwarn << "Fatal GPU error: " << _e.what();
+		cwarn << "Terminating.";
+		exit(-1);
+	}
+	catch (std::runtime_error const& _e)
+	{
+		cwarn << "Error CUDA mining: " << _e.what();
 		if(s_exit)
 			exit(1);
 		return false;
 	}
+}
+
+#include <iostream>
+#include <fstream>
+
+void CUDAMiner::compileKernel(
+	uint64_t block_number,
+	uint64_t dag_words)
+{
+	const char* name = "progpow_search";
+
+	std::string text = ProgPow::getKern(block_number, ProgPow::KERNEL_CUDA);
+	text += std::string(CUDAMiner_kernel, sizeof(CUDAMiner_kernel));
+
+	ofstream write;
+	write.open("kernel.cu");
+	write << text;
+	write.close();
+
+	nvrtcProgram prog;
+	NVRTC_SAFE_CALL(
+		nvrtcCreateProgram(
+			&prog,         // prog
+			text.c_str(),  // buffer
+			"kernel.cu",    // name
+			0,             // numHeaders
+			NULL,          // headers
+			NULL));        // includeNames
+
+	NVRTC_SAFE_CALL(nvrtcAddNameExpression(prog, name));
+	cudaDeviceProp device_props;
+	CUDA_SAFE_CALL(cudaGetDeviceProperties(&device_props, m_device_num));
+	std::string op_arch = "--gpu-architecture=compute_" + to_string(device_props.major) + to_string(device_props.minor);
+	std::string op_dag = "-DPROGPOW_DAG_WORDS=" + to_string(dag_words);
+
+	const char *opts[] = {
+		op_arch.c_str(),
+		op_dag.c_str(),
+		"-lineinfo"
+	};
+	nvrtcResult compileResult = nvrtcCompileProgram(
+		prog,  // prog
+		3,     // numOptions
+		opts); // options
+	// Obtain compilation log from the program.
+	size_t logSize;
+	NVRTC_SAFE_CALL(nvrtcGetProgramLogSize(prog, &logSize));
+	char *log = new char[logSize];
+	NVRTC_SAFE_CALL(nvrtcGetProgramLog(prog, log));
+	cudalog << "Compile log: " << log;
+	delete[] log;
+	NVRTC_SAFE_CALL(compileResult);
+	// Obtain PTX from the program.
+	size_t ptxSize;
+	NVRTC_SAFE_CALL(nvrtcGetPTXSize(prog, &ptxSize));
+	char *ptx = new char[ptxSize];
+	NVRTC_SAFE_CALL(nvrtcGetPTX(prog, ptx));
+	write.open("kernel.ptx");
+	write << ptx;
+	write.close();
+	// Load the generated PTX and get a handle to the kernel.
+	char *jitInfo = new char[32 * 1024];
+	char *jitErr = new char[32 * 1024];
+	CUjit_option jitOpt[] = {
+		CU_JIT_INFO_LOG_BUFFER,
+		CU_JIT_ERROR_LOG_BUFFER,
+		CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+		CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
+		CU_JIT_LOG_VERBOSE,
+		CU_JIT_GENERATE_LINE_INFO
+	};
+	void *jitOptVal[] = {
+		jitInfo,
+		jitErr,
+		(void*)(32 * 1024),
+		(void*)(32 * 1024),
+		(void*)(1),
+		(void*)(1)
+	};
+	CU_SAFE_CALL(cuModuleLoadDataEx(&m_module, ptx, 6, jitOpt, jitOptVal));
+	cudalog << "JIT info: \n" << jitInfo;
+	cudalog << "JIT err: \n" << jitErr;
+	delete[] ptx;
+	delete[] jitInfo;
+	delete[] jitErr;
+	// Find the mangled name
+	const char* mangledName;
+	NVRTC_SAFE_CALL(nvrtcGetLoweredName(prog, name, &mangledName));
+	cudalog << "Mangled name: " << mangledName;
+	CU_SAFE_CALL(cuModuleGetFunction(&m_kernel, m_module, mangledName));
+	cudalog << "done compiling";
+	// Destroy the program.
+	NVRTC_SAFE_CALL(nvrtcDestroyProgram(&prog));
 }
 
 void CUDAMiner::search(
@@ -448,13 +559,11 @@ void CUDAMiner::search(
 	if (memcmp(&m_current_header, header, sizeof(hash32_t)))
 	{
 		m_current_header = *reinterpret_cast<hash32_t const *>(header);
-		set_header(m_current_header);
 		initialize = true;
 	}
 	if (m_current_target != target)
 	{
 		m_current_target = target;
-		set_target(m_current_target);
 		initialize = true;
 	}
 	if (_ethStratum)
@@ -512,7 +621,13 @@ void CUDAMiner::search(
 				}
 			}
 		}
-		run_ethash_search(s_gridSize, s_blockSize, stream, buffer, m_current_nonce, m_parallelHash);
+		void *args[] = {&m_current_nonce, &m_current_header, &m_current_target, &m_dag, &buffer};
+		CU_SAFE_CALL(cuLaunchKernel(m_kernel,
+			s_gridSize, 1, 1,   // grid dim
+			s_blockSize, 1, 1,  // block dim
+			0,					// shared mem
+			stream,				// stream
+			args, 0));          // arguments
 		if (m_current_index >= s_numStreams)
 		{
             if (found_count)

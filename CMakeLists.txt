@@ -86,6 +86,7 @@ include(EthCompilerSettings)
 
 cable_add_buildinfo_library(PREFIX ethminer)
 
+add_subdirectory(libprogpow)
 add_subdirectory(libdevcore)
 add_subdirectory(libethash)
 add_subdirectory(libethcore)
