@@ -347,12 +347,12 @@ bool CUDAMiner::cuda_init(
 		m_streams = new cudaStream_t[s_numStreams];
 
 		uint64_t dagBytes = ethash_get_datasize(_light->block_number);
-		uint32_t dagWords   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+		uint32_t dagElms   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
 		uint32_t lightWords = (unsigned)(_lightBytes / sizeof(node));
 
 		CUDA_SAFE_CALL(cudaSetDevice(m_device_num));
 		cudalog << "Set Device to current";
-		if(dagWords != m_dag_words || !m_dag)
+		if(dagElms != m_dag_elms || !m_dag)
 		{
 			//Check whether the current device has sufficient memory every time we recreate the dag
 			if (device_props.totalGlobalMem < dagBytes)
@@ -376,7 +376,7 @@ bool CUDAMiner::cuda_init(
 		hash64_t * dag = m_dag;
 		hash64_t * light = m_light[m_device_num];
 
-		compileKernel(_light->block_number, dagWords);
+		compileKernel(_light->block_number, dagElms);
 
 		if(!light){ 
 			cudalog << "Allocating light with size: " << _lightBytes;
@@ -386,10 +386,10 @@ bool CUDAMiner::cuda_init(
 		CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(light), _lightData, _lightBytes, cudaMemcpyHostToDevice));
 		m_light[m_device_num] = light;
 		
-		if(dagWords != m_dag_words || !dag) // create buffer for dag
+		if(dagElms != m_dag_elms || !dag) // create buffer for dag
 			CUDA_SAFE_CALL(cudaMalloc(reinterpret_cast<void**>(&dag), dagBytes));
 		
-		if(dagWords != m_dag_words || !dag)
+		if(dagElms != m_dag_elms || !dag)
 		{
 			// create mining buffers
 			cudalog << "Generating mining buffers";
@@ -436,7 +436,7 @@ cpyDag:
 		}
     
 		m_dag = dag;
-		m_dag_words = dagWords;
+		m_dag_elms = dagElms;
 
 		return true;
 	}
@@ -460,7 +460,7 @@ cpyDag:
 
 void CUDAMiner::compileKernel(
 	uint64_t block_number,
-	uint64_t dag_words)
+	uint64_t dag_elms)
 {
 	const char* name = "progpow_search";
 
@@ -486,7 +486,7 @@ void CUDAMiner::compileKernel(
 	cudaDeviceProp device_props;
 	CUDA_SAFE_CALL(cudaGetDeviceProperties(&device_props, m_device_num));
 	std::string op_arch = "--gpu-architecture=compute_" + to_string(device_props.major) + to_string(device_props.minor);
-	std::string op_dag = "-DPROGPOW_DAG_WORDS=" + to_string(dag_words);
+	std::string op_dag = "-DPROGPOW_DAG_ELEMENTS=" + to_string(dag_elms);
 
 	const char *opts[] = {
 		op_arch.c_str(),
@@ -621,7 +621,8 @@ void CUDAMiner::search(
 				}
 			}
 		}
-		void *args[] = {&m_current_nonce, &m_current_header, &m_current_target, &m_dag, &buffer};
+        bool hack_false = false;
+		void *args[] = {&m_current_nonce, &m_current_header, &m_current_target, &m_dag, &buffer, &hack_false};
 		CU_SAFE_CALL(cuLaunchKernel(m_kernel,
 			s_gridSize, 1, 1,   // grid dim
 			s_blockSize, 1, 1,  // block dim

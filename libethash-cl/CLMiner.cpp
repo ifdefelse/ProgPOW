@@ -595,7 +595,7 @@ bool CLMiner::init(int epoch)
 			m_globalWorkSize = ((m_globalWorkSize / m_workgroupSize) + 1) * m_workgroupSize;
 
 		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
-		uint32_t dagWords = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+		uint32_t dagElms = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
 		uint32_t lightWords = (unsigned)(light->data().size() / sizeof(node));
 
 		// patch source code
@@ -607,7 +607,7 @@ bool CLMiner::init(int epoch)
 
 		addDefinition(code, "GROUP_SIZE", m_workgroupSize);
 		addDefinition(code, "PROGPOW_DAG_BYTES", dagBytes);
-		addDefinition(code, "PROGPOW_DAG_WORDS", dagWords);
+		addDefinition(code, "PROGPOW_DAG_ELEMENTS", dagElms);
 		addDefinition(code, "LIGHT_WORDS", lightWords);
 		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
 		addDefinition(code, "PLATFORM", platformId);
@@ -663,7 +663,7 @@ bool CLMiner::init(int epoch)
 
 		m_searchKernel.setArg(1, m_header);
 		m_searchKernel.setArg(2, m_dag);
-		m_searchKernel.setArg(5, ~0u);  // Pass this to stop the compiler unrolling the loops.
+		m_searchKernel.setArg(5, 0);
 
 		// create mining buffers
 		ETHCL_LOG("Creating mining buffer");
