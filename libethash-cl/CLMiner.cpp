@@ -6,6 +6,8 @@
 #include "CLMiner.h"
 #include <libethash/internal.h>
 #include "CLMiner_kernel.h"
+#include <iostream>
+#include <fstream>
 
 using namespace dev;
 using namespace eth;
@@ -612,6 +614,11 @@ bool CLMiner::init(int epoch)
 		addDefinition(code, "MAX_OUTPUTS", c_maxSearchResults);
 		addDefinition(code, "PLATFORM", platformId);
 		addDefinition(code, "COMPUTE", computeCapability);
+
+        ofstream out;
+        out.open("kernel.cl");
+        out << code;
+        out.close();
 
 		// create miner OpenCL program
 		cl::Program::Sources sources{{code.data(), code.size()}};
