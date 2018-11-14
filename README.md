@@ -332,7 +332,7 @@ void progPowLoop(
         // global load to sequential locations
         uint32_t data_g[PROGPOW_DAG_LOADS];
         for (int i = 0; i < PROGPOW_DAG_LOADS; i++)
-            data_g[i] = dag[(offset_g*PROGPOW_LANES + l)*PROGPOW_DAG_LOADS + i];
+            data_g[i] = dag[(offset_g*PROGPOW_LANES + (l + loop) % 16)*PROGPOW_DAG_LOADS + i];
 
         // initialize the seed and mix destination sequence
         int mix_seq_dst[PROGPOW_REGS];
