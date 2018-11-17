@@ -57,7 +57,7 @@ CUDAMiner::~CUDAMiner()
 	kick_miner();
 }
 
-bool CUDAMiner::init(int epoch)
+bool CUDAMiner::init(int epoch, uint64_t block_number)
 {
 	try {
 		if (s_dagLoadMode == DAG_LOAD_MODE_SEQUENTIAL)
@@ -71,7 +71,7 @@ bool CUDAMiner::init(int epoch)
 		light = EthashAux::light(epoch);
 		bytesConstRef lightData = light->data();
 
-		cuda_init(getNumDevices(), light->light, lightData.data(), lightData.size(), 
+		cuda_init(getNumDevices(), block_number, light->light, lightData.data(), lightData.size(),
 			device, (s_dagLoadMode == DAG_LOAD_MODE_SINGLE), s_dagInHostMemory, s_dagCreateDevice);
 		s_dagLoadIndex++;
     
@@ -100,6 +100,7 @@ void CUDAMiner::workLoop()
 {
 	WorkPackage current;
 	current.header = h256{1u};
+	uint64_t old_period_seed = -1;
 
 	try
 	{
@@ -107,8 +108,9 @@ void CUDAMiner::workLoop()
 		{
 	                // take local copy of work since it may end up being overwritten.
 			const WorkPackage w = work();
-			
-			if (current.header != w.header || current.epoch != w.epoch)
+			uint64_t period_seed = w.height / PROGPOW_PERIOD;
+
+			if (current.header != w.header || current.epoch != w.epoch || old_period_seed != period_seed)
 			{
 				if(!w || w.header == h256())
 				{
@@ -117,8 +119,17 @@ void CUDAMiner::workLoop()
 					continue;
 				}
 				if (current.epoch != w.epoch)
-					if(!init(w.epoch))
+				{
+					if(!init(w.epoch, w.height))
 						break;
+				}
+				else if (old_period_seed != period_seed)
+				{
+					uint64_t dagBytes = ethash_get_datasize(w.height);
+					uint32_t dagElms   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+					compileKernel(period_seed, dagElms);
+				}
+				old_period_seed = period_seed;
 				current = w;
 			}
 			uint64_t upper64OfBoundary = (uint64_t)(u64)((u256)current.boundary >> 192);
@@ -319,6 +330,7 @@ bool CUDAMiner::s_noeval = false;
 
 bool CUDAMiner::cuda_init(
 	size_t numDevices,
+	uint64_t block_number,
 	ethash_light_t _light,
 	uint8_t const* _lightData,
 	uint64_t _lightBytes,
@@ -346,9 +358,11 @@ bool CUDAMiner::cuda_init(
 		m_search_buf = new volatile search_results *[s_numStreams];
 		m_streams = new cudaStream_t[s_numStreams];
 
-		uint64_t dagBytes = ethash_get_datasize(_light->block_number);
+		uint64_t dagBytes = ethash_get_datasize(block_number);
 		uint32_t dagElms   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
 		uint32_t lightWords = (unsigned)(_lightBytes / sizeof(node));
+
+		uint64_t period_seed = block_number / PROGPOW_PERIOD;
 
 		CUDA_SAFE_CALL(cudaSetDevice(m_device_num));
 		cudalog << "Set Device to current";
@@ -376,7 +390,7 @@ bool CUDAMiner::cuda_init(
 		hash64_t * dag = m_dag;
 		hash64_t * light = m_light[m_device_num];
 
-		compileKernel(_light->block_number, dagElms);
+		compileKernel(period_seed, dagElms);
 
 		if(!light){ 
 			cudalog << "Allocating light with size: " << _lightBytes;
@@ -459,12 +473,12 @@ cpyDag:
 #include <fstream>
 
 void CUDAMiner::compileKernel(
-	uint64_t block_number,
+	uint64_t period_seed,
 	uint64_t dag_elms)
 {
 	const char* name = "progpow_search";
 
-	std::string text = ProgPow::getKern(block_number, ProgPow::KERNEL_CUDA);
+	std::string text = ProgPow::getKern(period_seed, ProgPow::KERNEL_CUDA);
 	text += std::string(CUDAMiner_kernel, sizeof(CUDAMiner_kernel));
 
 	ofstream write;

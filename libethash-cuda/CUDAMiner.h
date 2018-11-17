@@ -75,6 +75,7 @@ public:
 
 	bool cuda_init(
 		size_t numDevices,
+		uint64_t block_number,
 		ethash_light_t _light,
 		uint8_t const* _lightData,
 		uint64_t _lightSize,
@@ -106,7 +107,7 @@ private:
 
 	void workLoop() override;
 
-	bool init(int epoch);
+	bool init(int epoch, uint64_t block_number);
 
 	hash32_t m_current_header;
 	uint64_t m_current_target;
@@ -141,7 +142,7 @@ private:
 
 	static bool s_noeval;
 
-	void compileKernel(uint64_t block_number, uint64_t dag_words);
+	void compileKernel(uint64_t prog_seed, uint64_t dag_words);
 
 };
 
