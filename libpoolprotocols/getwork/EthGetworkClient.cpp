@@ -98,6 +98,7 @@ void EthGetworkClient::workLoop()
 				WorkPackage newWorkPackage;
 				newWorkPackage.header = h256(v[0].asString());
 				newWorkPackage.epoch = EthashAux::toEpoch(h256(v[1].asString()));
+				newWorkPackage.height = strtoul(v[3].asString().c_str(), nullptr, 0);
 
 				// Since we do not have a real connected state with getwork, we just fake it.
 				// If getting work succeeds we know that the connection works
@@ -111,6 +112,7 @@ void EthGetworkClient::workLoop()
 				if (newWorkPackage.header != m_prevWorkPackage.header) {
 					m_prevWorkPackage.header = newWorkPackage.header;
 					m_prevWorkPackage.epoch = newWorkPackage.epoch;
+					m_prevWorkPackage.height = newWorkPackage.height;
 					m_prevWorkPackage.boundary = h256(fromHex(v[2].asString()), h256::AlignRight);
 
 					if (m_onWorkReceived) {
