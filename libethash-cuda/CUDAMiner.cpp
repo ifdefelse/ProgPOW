@@ -71,7 +71,7 @@ bool CUDAMiner::init(int epoch)
 		light = EthashAux::light(epoch);
 		bytesConstRef lightData = light->data();
 
-		cuda_init(getNumDevices(), light->light, lightData.data(), lightData.size(), 
+		cuda_init(getNumDevices(), light->light, lightData.data(), lightData.size(),
 			device, (s_dagLoadMode == DAG_LOAD_MODE_SINGLE), s_dagInHostMemory, s_dagCreateDevice);
 		s_dagLoadIndex++;
     
@@ -100,6 +100,7 @@ void CUDAMiner::workLoop()
 {
 	WorkPackage current;
 	current.header = h256{1u};
+	uint64_t old_period_seed = -1;
 
 	try
 	{
@@ -107,8 +108,9 @@ void CUDAMiner::workLoop()
 		{
 	                // take local copy of work since it may end up being overwritten.
 			const WorkPackage w = work();
-			
-			if (current.header != w.header || current.epoch != w.epoch)
+			uint64_t period_seed = w.height / PROGPOW_PERIOD;
+
+			if (current.header != w.header || current.epoch != w.epoch || old_period_seed != period_seed)
 			{
 				if(!w || w.header == h256())
 				{
@@ -119,6 +121,13 @@ void CUDAMiner::workLoop()
 				if (current.epoch != w.epoch)
 					if(!init(w.epoch))
 						break;
+				if (old_period_seed != period_seed)
+				{
+					uint64_t dagBytes = ethash_get_datasize(w.height);
+					uint32_t dagElms   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+					compileKernel(w.height, dagElms);
+				}
+				old_period_seed = period_seed;
 				current = w;
 			}
 			uint64_t upper64OfBoundary = (uint64_t)(u64)((u256)current.boundary >> 192);
@@ -375,8 +384,6 @@ bool CUDAMiner::cuda_init(
 		// create buffer for cache
 		hash64_t * dag = m_dag;
 		hash64_t * light = m_light[m_device_num];
-
-		compileKernel(_light->block_number, dagElms);
 
 		if(!light){ 
 			cudalog << "Allocating light with size: " << _lightBytes;

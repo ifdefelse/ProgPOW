@@ -501,6 +501,7 @@ void EthStratumClient::processReponse(Json::Value& responseObject)
 				{
 					string sSeedHash = params.get(1, "").asString();
 					string sHeaderHash = params.get(2, "").asString();
+					uint64_t iBlockHeight = params.get(3, "").asInt64();
 
 					if (sHeaderHash != "" && sSeedHash != "")
 					{
@@ -508,6 +509,7 @@ void EthStratumClient::processReponse(Json::Value& responseObject)
 
 						m_current.header = h256(sHeaderHash);
 						m_current.epoch = EthashAux::toEpoch(h256(sSeedHash));
+						m_current.height = iBlockHeight;
 						m_current.boundary = h256();
 						diffToTarget((uint32_t*)m_current.boundary.data(), m_nextWorkDifficulty);
 						m_current.startNonce = ethash_swap_u64(*((uint64_t*)m_extraNonce.data()));
@@ -527,6 +529,7 @@ void EthStratumClient::processReponse(Json::Value& responseObject)
 					string sHeaderHash = params.get((Json::Value::ArrayIndex)index++, "").asString();
 					string sSeedHash = params.get((Json::Value::ArrayIndex)index++, "").asString();
 					string sShareTarget = params.get((Json::Value::ArrayIndex)index++, "").asString();
+					uint64_t iBlockHeight = params.get((Json::Value::ArrayIndex)index++, "").asInt64();
 
 					// coinmine.pl fix
 					int l = sShareTarget.length();
@@ -545,6 +548,7 @@ void EthStratumClient::processReponse(Json::Value& responseObject)
 							m_current.header = h256(sHeaderHash);
 							m_current.epoch = EthashAux::toEpoch(h256(sSeedHash));
 							m_current.boundary = h256(sShareTarget);
+							m_current.height = iBlockHeight;
 							m_current.job = h256(job);
 
 							if (m_onWorkReceived) {

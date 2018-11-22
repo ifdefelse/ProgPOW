@@ -72,7 +72,8 @@ struct WorkPackage
     explicit WorkPackage(BlockHeader const& _bh)
       : boundary(_bh.boundary()),
         header(_bh.hashWithout()),
-        epoch(static_cast<int>(_bh.number()) / ETHASH_EPOCH_LENGTH)
+        epoch(static_cast<int>(_bh.number()) / ETHASH_EPOCH_LENGTH),
+        height(static_cast<uint64_t>(_bh.number()))
     {}
     explicit operator bool() const { return header != h256(); }
 
@@ -82,6 +83,7 @@ struct WorkPackage
     int epoch = -1;
 
     uint64_t startNonce = 0;
+    uint64_t height = 0;
     int exSizeBits = -1;
     int job_len = 8;
 };
