@@ -231,7 +231,9 @@ bool progpow_search(
 }
 ```
 
-The inner loop uses FNV and KISS99 to generate a random sequence from the `prog_seed`.  This random sequence determines which mix state is accessed and what random math is performed. Since the `prog_seed` changes relatively infrequently it is expected that `progPowLoop` will be pre-compiled while mining instead of interpreted on the fly.
+The inner loop uses FNV and KISS99 to generate a random sequence from the `prog_seed`.  This random sequence determines which mix state is accessed and what random math is performed.
+
+Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (12.5 minutes) it is expected that `progPowLoop` will be evaluated on the CPU to generate source code for that period's sequence.  The source code will be compiled on the CPU before running on the GPU.  You can see an example sequence and generated source code in [kernel.cu](test/kernel.cu).
 
 ```cpp
 kiss99_t progPowInit(uint64_t prog_seed, int mix_seq_dst[PROGPOW_REGS], int mix_seq_src[PROGPOW_REGS])
