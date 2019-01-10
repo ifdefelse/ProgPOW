@@ -16,9 +16,12 @@ The main elements of the algorithm are:
 * Adds reads from a small, low-latency cache that supports random addresses.
 * Increases the DRAM read from 128 bytes to 256 bytes.
 
+The random sequence changes once per `PROGPOW_PERIOD` (12.5 minutes).  Source code will be generated for the random sequence and compiled on the host CPU.  The GPU will execute this compiled code where what math to perform and what mix state to use is already resolved.
+
 While a custom ASIC to implement this algorithm is still possible, the efficiency gains available are minimal.  The majority of a commodity GPU is required to support the above elements. The only optimizations available are:
-*Remove the graphics pipeline (displays, geometry engines, texturing, etc)
-*Remove floating point math
+* Remove the graphics pipeline (displays, geometry engines, texturing, etc)
+* Remove floating point math
+* A few ISA tweaks, like instructions that exactly match the merge() function
 
 These would result in minimal, roughly 1.1-1.2x, efficiency gains.  This is much less than the 2x for Ethash or 50x for Cryptonight.
 
