@@ -16,7 +16,7 @@ The main elements of the algorithm are:
 * Adds reads from a small, low-latency cache that supports random addresses.
 * Increases the DRAM read from 128 bytes to 256 bytes.
 
-The random sequence changes once per `PROGPOW_PERIOD` (12.5 minutes).  Source code will be generated for the random sequence and compiled on the host CPU.  The GPU will execute this compiled code where what math to perform and what mix state to use is already resolved.
+The random sequence changes every `PROGPOW_PERIOD` (50 blocks or about 12.5 minutes).  When mining source code is generated for the random sequence and compiled on the host CPU.  The GPU will execute the compiled code where what math to perform and what mix state to use are already resolved.
 
 While a custom ASIC to implement this algorithm is still possible, the efficiency gains available are minimal.  The majority of a commodity GPU is required to support the above elements. The only optimizations available are:
 * Remove the graphics pipeline (displays, geometry engines, texturing, etc)
@@ -236,7 +236,7 @@ bool progpow_search(
 
 The inner loop uses FNV and KISS99 to generate a random sequence from the `prog_seed`.  This random sequence determines which mix state is accessed and what random math is performed.
 
-Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (12.5 minutes) it is expected that `progPowLoop` will be evaluated on the CPU to generate source code for that period's sequence.  The source code will be compiled on the CPU before running on the GPU.  You can see an example sequence and generated source code in [kernel.cu](test/kernel.cu).
+Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (50 blocks or about 12.5 minutes) it is expected that while mining `progPowLoop` will be evaluated on the CPU to generate source code for that period's sequence.  The source code will be compiled on the CPU before running on the GPU.  You can see an example sequence and generated source code in [kernel.cu](test/kernel.cu).
 
 ```cpp
 kiss99_t progPowInit(uint64_t prog_seed, int mix_seq_dst[PROGPOW_REGS], int mix_seq_src[PROGPOW_REGS])
