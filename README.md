@@ -396,8 +396,8 @@ The algorithm run on block 30,000 produces the following digest and result:
 header ffeeddccbbaa9988776655443322110000112233445566778899aabbccddeeff
 nonce 123456789abcdef0
 
-digest: 44fa88669c864aa30ba7da46e557593289c4d1fb143a1c43813d512b14fb4636
-result (top 64 bits): b946ea7d74e3c619
+digest: 11f19805c58ab46610ff9c719dcf0a5f18fa2f1605798eef770c47219274767d
+result (top 64 bits): 5b7ccd472dbefdd9
 ```
 
 A full run showing intermediate values can be seen in [result.log](test/result.log)
