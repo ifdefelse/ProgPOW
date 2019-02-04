@@ -300,7 +300,7 @@ uint32_t merge(uint32_t a, uint32_t b, uint32_t r)
 }
 ```
 
-The math operations chosen for the random math are ones that are easy to implement in CUDA and OpenCL, the two main programming languages for commodity GPUs. The [mul_hi](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/mul_hi.html), [min](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/min.html), [clz](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/clz.html), and [popcount](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/popcount.html) functions match the corresponding OpenCL functions.  ROTL32 matches the OpenCL [rotate](https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/rotate.html) function.  ROTR32 is rotate right, which is equivalent to `rotate(i, 32-v)`.
+The math operations chosen for the random math are ones that are easy to implement in CUDA and OpenCL, the two main programming languages for commodity GPUs. The [mul_hi](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/mul_hi.html), [min](https://www.khronos.org/registry/OpenCL/sdk/2.0/docs/man/xhtml/integerMax.html), [clz](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/clz.html), and [popcount](https://www.khronos.org/registry/OpenCL/sdk/2.0/docs/man/xhtml/popcount.html) functions match the corresponding OpenCL functions.  ROTL32 matches the OpenCL [rotate](https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/rotate.html) function.  ROTR32 is rotate right, which is equivalent to `rotate(i, 32-v)`.
 
 ```cpp
 // Random math between two input values
