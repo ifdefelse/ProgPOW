@@ -148,12 +148,11 @@ void fill_mix(
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
-    uint32_t fnv_hash = FNV_OFFSET_BASIS;
     kiss99_t st;
-    st.z = fnv_hash = fnv1a(fnv_hash, seed);
-    st.w = fnv_hash = fnv1a(fnv_hash, seed >> 32);
-    st.jsr = fnv_hash = fnv1a(fnv_hash, lane_id);
-    st.jcong = fnv_hash = fnv1a(fnv_hash, lane_id);
+    st.z = fnv1a(FNV_OFFSET_BASIS, seed);
+    st.w = fnv1a(st.z, seed >> 32);
+    st.jsr = fnv1a(st.w, lane_id);
+    st.jcong = fnv1a(st.jsr, lane_id);
     for (int i = 0; i < PROGPOW_REGS; i++)
             mix[i] = kiss99(st);
 }
@@ -254,11 +253,10 @@ Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (50 blocks or about
 kiss99_t progPowInit(uint64_t prog_seed, int mix_seq_dst[PROGPOW_REGS], int mix_seq_src[PROGPOW_REGS])
 {
     kiss99_t prog_rnd;
-    uint32_t fnv_hash = FNV_OFFSET_BASIS;
-    prog_rnd.z = fnv_hash = fnv1a(fnv_hash, prog_seed);
-    prog_rnd.w = fnv_hash = fnv1a(fnv_hash, prog_seed >> 32);
-    prog_rnd.jsr = fnv_hash = fnv1a(fnv_hash, prog_seed);
-    prog_rnd.jcong = fnv_hash = fnv1a(fnv_hash, prog_seed >> 32);
+    prog_rnd.z = fnv1a(FNV_OFFSET_BASIS, prog_seed);
+    prog_rnd.w = fnv1a(prog_rnd.z, prog_seed >> 32);
+    prog_rnd.jsr = fnv1a(prog_rnd.w, prog_seed);
+    prog_rnd.jcong = fnv1a(prog_rnd.jsr, prog_seed >> 32);
     // Create a random sequence of mix destinations for merge() and mix sources for cache reads
     // guarantees every destination merged once
     // guarantees no duplicate cache reads, which could be optimized away
