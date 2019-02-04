@@ -89,7 +89,7 @@ Ethash requires external memory due to the large size of the DAG.  However that 
 
 ## ProgPoW Algorithm Walkthrough
 
-The DAG is generated exactly as in ethash.
+The DAG is generated exactly as in ethash.  All the parameters (ephoch length, DAG size, etc) are unchanged.  See the original [ethash](https://github.com/ethereum/wiki/wiki/Ethash) spec for details on generating the DAG.
 
 ProgPoW can be tuned using the following parameters.  The proposed settings have been tuned for a range of existing, commodity GPUs:
 
@@ -109,10 +109,12 @@ ProgPoW uses **FNV1a** for merging data. The existing Ethash uses FNV1 for mergi
 ProgPow uses [KISS99](https://en.wikipedia.org/wiki/KISS_(algorithm)) for random number generation. This is the simplest (fewest instruction) random generator that passes the TestU01 statistical test suite.  A more complex random number generator like Mersenne Twister can be efficiently implemented on a specialized ASIC, providing an opportunity for efficiency gains.
 
 ```cpp
+const uint32_t FNV_PRIME = 0x1000193;
+const uint32_t FNV_OFFSET_BASIS = 0x811c9dc5;
 
-uint32_t fnv1a(uint32_t &h, uint32_t d)
+uint32_t fnv1a(uint32_t h, uint32_t d)
 {
-    return h = (h ^ d) * 0x1000193;
+    return (h ^ d) * FNV_PRIME;
 }
 
 typedef struct {
@@ -146,12 +148,12 @@ void fill_mix(
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
-    uint32_t fnv_hash = 0x811c9dc5;
+    uint32_t fnv_hash = FNV_OFFSET_BASIS;
     kiss99_t st;
-    st.z = fnv1a(fnv_hash, seed);
-    st.w = fnv1a(fnv_hash, seed >> 32);
-    st.jsr = fnv1a(fnv_hash, lane_id);
-    st.jcong = fnv1a(fnv_hash, lane_id);
+    st.z = fnv_hash = fnv1a(fnv_hash, seed);
+    st.w = fnv_hash = fnv1a(fnv_hash, seed >> 32);
+    st.jsr = fnv_hash = fnv1a(fnv_hash, lane_id);
+    st.jcong = fnv_hash = fnv1a(fnv_hash, lane_id);
     for (int i = 0; i < PROGPOW_REGS; i++)
             mix[i] = kiss99(st);
 }
@@ -159,13 +161,18 @@ void fill_mix(
 
 Like ethash Keccak is used to seed the sequence per-nonce and to produce the final result.  The keccak-f800 variant is used as the 32-bit word size matches the native word size of modern GPUs.  The implementation is a variant of SHAKE with width=800, bitrate=576, capacity=224, output=256, and no padding.  The result of keccak is treated as a 256-bit big-endian number - that is result byte 0 is the MSB of the value.
 
+As with ethash the input and output of the keccak function are fixed and relatively small.  This means only a single "absorb" and "squeeze" phase are required.  See the [official Keccak specs](https://keccak.team/keccak_specs_summary.html) for more details.
+
 ```cpp
 hash32_t keccak_f800_progpow(hash32_t header, uint64_t seed, hash32_t digest)
 {
     uint32_t st[25];
 
+    // Initialization
     for (int i = 0; i < 25; i++)
         st[i] = 0;
+
+    // Absorb phase for fixed 18 words of input
     for (int i = 0; i < 8; i++)
         st[i] = header.uint32s[i];
     st[8] = seed;
@@ -173,12 +180,15 @@ hash32_t keccak_f800_progpow(hash32_t header, uint64_t seed, hash32_t digest)
     for (int i = 0; i < 8; i++)
         st[10+i] = digest.uint32s[i];
 
+    // keccak_f800 call for the single absorb pass
     for (int r = 0; r < 22; r++)
         keccak_f800_round(st, r);
 
+    // Squeeze phase for fixed 8 words of output
     hash32_t ret;
     for (int i=0; i<8; i++)
         ret.uint32s[i] = st[i];
+
     return ret;
 }
 ```
@@ -221,15 +231,15 @@ bool progpow_search(
     uint32_t digest_lane[PROGPOW_LANES];
     for (int l = 0; l < PROGPOW_LANES; l++)
     {
-        digest_lane[l] = 0x811c9dc5
+        digest_lane[l] = FNV_OFFSET_BASIS
         for (int i = 0; i < PROGPOW_REGS; i++)
-            fnv1a(digest_lane[l], mix[l][i]);
+            digest_lane[l] = fnv1a(digest_lane[l], mix[l][i]);
     }
     // Reduce all lanes to a single 256-bit digest
     for (int i = 0; i < 8; i++)
-        digest.uint32s[i] = 0x811c9dc5;
+        digest.uint32s[i] = FNV_OFFSET_BASIS;
     for (int l = 0; l < PROGPOW_LANES; l++)
-        fnv1a(digest.uint32s[l%8], digest_lane[l])
+        digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l])
 
     // keccak(header .. keccak(header..nonce) .. digest);
     return (keccak_f800_progpow(header, seed, digest) <= target);
@@ -244,11 +254,11 @@ Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (50 blocks or about
 kiss99_t progPowInit(uint64_t prog_seed, int mix_seq_dst[PROGPOW_REGS], int mix_seq_src[PROGPOW_REGS])
 {
     kiss99_t prog_rnd;
-    uint32_t fnv_hash = 0x811c9dc5;
-    prog_rnd.z = fnv1a(fnv_hash, prog_seed);
-    prog_rnd.w = fnv1a(fnv_hash, prog_seed >> 32);
-    prog_rnd.jsr = fnv1a(fnv_hash, prog_seed);
-    prog_rnd.jcong = fnv1a(fnv_hash, prog_seed >> 32);
+    uint32_t fnv_hash = FNV_OFFSET_BASIS;
+    prog_rnd.z = fnv_hash = fnv1a(fnv_hash, prog_seed);
+    prog_rnd.w = fnv_hash = fnv1a(fnv_hash, prog_seed >> 32);
+    prog_rnd.jsr = fnv_hash = fnv1a(fnv_hash, prog_seed);
+    prog_rnd.jcong = fnv_hash = fnv1a(fnv_hash, prog_seed >> 32);
     // Create a random sequence of mix destinations for merge() and mix sources for cache reads
     // guarantees every destination merged once
     // guarantees no duplicate cache reads, which could be optimized away
@@ -277,20 +287,20 @@ The math operations that merges values into the mix data are ones chosen to main
 // Assuming A has high entropy only do ops that retain entropy
 // even if B is low entropy
 // (IE don't do A&B)
-void merge(uint32_t &a, uint32_t b, uint32_t r)
+uint32_t merge(uint32_t a, uint32_t b, uint32_t r)
 {
     switch (r % 4)
     {
-    case 0: a = (a * 33) + b; break;
-    case 1: a = (a ^ b) * 33; break;
+    case 0: return (a * 33) + b; break;
+    case 1: return (a ^ b) * 33; break;
     // prevent rotate by 0 which is a NOP
-    case 2: a = ROTL32(a, ((r >> 16) % 31) + 1) ^ b; break;
-    case 3: a = ROTR32(a, ((r >> 16) % 31) + 1) ^ b; break;
+    case 2: return ROTL32(a, ((r >> 16) % 31) + 1) ^ b; break;
+    case 3: return ROTR32(a, ((r >> 16) % 31) + 1) ^ b; break;
     }
 }
 ```
 
-The math operations chosen for the random math are ones that are easy to implement in CUDA and OpenCL, the two main programming languages for commodity GPUs.
+The math operations chosen for the random math are ones that are easy to implement in CUDA and OpenCL, the two main programming languages for commodity GPUs. The [mul_hi](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/mul_hi.html), [min](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/min.html), [clz](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/clz.html), and [popcount](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/popcount.html) functions match the corresponding OpenCL functions.  ROTL32 matches the OpenCL [rotate](https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/rotate.html) function.  ROTR32 is rotate right, which is equivalent to `rotate(i, 32-v)`.
 
 ```cpp
 // Random math between two input values
@@ -313,7 +323,7 @@ uint32_t math(uint32_t a, uint32_t b, uint32_t r)
 }
 ```
 
-The main loop:
+The main loop.  `DAG_BYTES` is set to the number of bytes in the current DAG, which is generated identically to the existing ethash algorithm.
 
 ```cpp
 void progPowLoop(
@@ -322,17 +332,21 @@ void progPowLoop(
     uint32_t mix[PROGPOW_LANES][PROGPOW_REGS],
     const uint32_t *dag)
 {
-    // All lanes share a base address for the global load
-    // Global offset uses mix[0] to guarantee it depends on the load result
-    uint32_t data_g[PROGPOW_LANES][PROGPOW_DAG_LOADS];
-    uint32_t offset_g = mix[loop%PROGPOW_LANES][0] % (DAG_BYTES / (PROGPOW_LANES*PROGPOW_DAG_LOADS*sizeof(uint32_t)));
+    // dag_entry holds the 256 bytes of data loaded from the DAG
+    uint32_t dag_entry[PROGPOW_LANES][PROGPOW_DAG_LOADS];
+    // On each loop iteration rotate which lane is the source of the DAG address.
+    // The source lane's mix[0] value is used to ensure the last loop's DAG data feeds into this loop's address.
+    // dag_addr_base is which 256-byte entry within the DAG will be accessed
+    uint32_t dag_addr_base = mix[loop%PROGPOW_LANES][0] %
+        (DAG_BYTES / (PROGPOW_LANES*PROGPOW_DAG_LOADS*sizeof(uint32_t)));
     for (int l = 0; l < PROGPOW_LANES; l++)
     {
-        // global load to the 256 byte DAG entry
-        // every lane can access every part of the entry
-        uint32_t offset_l = offset_g * PROGPOW_LANES + (l ^ loop) % PROGPOW_LANES;
+        // Lanes access DAG_LOADS sequential words from the dag entry
+        // Shuffle which portion of the entry each lane accesses each iteration by XORing lane and loop.
+        // This prevents multi-chip ASICs from each storing just a portion of the DAG
+        size_t dag_addr_lane = dag_addr_base * PROGPOW_LANES + (l ^ loop) % PROGPOW_LANES;
         for (int i = 0; i < PROGPOW_DAG_LOADS; i++)
-            data_g[l][i] = dag[offset_l * PROGPOW_DAG_LOADS + i];
+            dag_entry[l][i] = dag[dag_addr_lane * PROGPOW_DAG_LOADS + i];
     }
 
     // Initialize the program seed and sequences
@@ -356,7 +370,7 @@ void progPowLoop(
             for (int l = 0; l < PROGPOW_LANES; l++)
             {
                 uint32_t offset = mix[l][src] % (PROGPOW_CACHE_BYTES/sizeof(uint32_t));
-                merge(mix[l][dst], dag[offset], sel);
+                mix[l][dst] = merge(mix[l][dst], dag[offset], sel);
             }
         }
         if (i < PROGPOW_CNT_MATH)
@@ -373,7 +387,7 @@ void progPowLoop(
             for (int l = 0; l < PROGPOW_LANES; l++)
             {
                 uint32_t data = math(mix[l][src1], mix[l][src2], sel1);
-                merge(mix[l][dst], data, sel2);
+                mix[l][dst] = merge(mix[l][dst], data, sel2);
             }
         }
     }
@@ -384,7 +398,7 @@ void progPowLoop(
         int dst = (i==0) ? 0 : mix_seq_dst[(mix_seq_dst_cnt++)%PROGPOW_REGS];
         int sel = kiss99(prog_rnd);
         for (int l = 0; l < PROGPOW_LANES; l++)
-            merge(mix[l][dst], data_g[l][i], sel);
+            mix[l][dst] = merge(mix[l][dst], dag_entry[l][i], sel);
     }
 }
 ```
