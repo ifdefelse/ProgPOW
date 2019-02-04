@@ -291,11 +291,11 @@ uint32_t merge(uint32_t a, uint32_t b, uint32_t r)
 {
     switch (r % 4)
     {
-    case 0: return (a * 33) + b; break;
-    case 1: return (a ^ b) * 33; break;
+    case 0: return (a * 33) + b;
+    case 1: return (a ^ b) * 33;
     // prevent rotate by 0 which is a NOP
-    case 2: return ROTL32(a, ((r >> 16) % 31) + 1) ^ b; break;
-    case 3: return ROTR32(a, ((r >> 16) % 31) + 1) ^ b; break;
+    case 2: return ROTL32(a, ((r >> 16) % 31) + 1) ^ b;
+    case 3: return ROTR32(a, ((r >> 16) % 31) + 1) ^ b;
     }
 }
 ```
@@ -323,7 +323,14 @@ uint32_t math(uint32_t a, uint32_t b, uint32_t r)
 }
 ```
 
-The main loop.  `DAG_BYTES` is set to the number of bytes in the current DAG, which is generated identically to the existing ethash algorithm.
+The inner loop.  `DAG_BYTES` is set to the number of bytes in the current DAG, which is generated identically to the existing ethash algorithm.
+
+The flow of the inner loop is:
+* Lane `(loop % LANES)` is chosen as the leader for that loop iteration
+* The leader's `mix[0]` value modulo the number of 256-byte DAG entries is is used to select where to read from the full DAG
+* Each lane reads `DAG_LOADS` sequential words, using `(lane ^ loop) % LANES` as the starting offset within the entry.
+* The random sequence of math and cache accesses is performed
+* The DAG data read at the start of the loop is merged at the end of the loop
 
 ```cpp
 void progPowLoop(
