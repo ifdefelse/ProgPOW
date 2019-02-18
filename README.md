@@ -104,9 +104,13 @@ ProgPoW can be tuned using the following parameters.  The proposed settings have
 
 The random program changes every `PROGPOW_PERIOD` blocks (default `50`, roughly 12.5 minutes) to ensure the hardware executing the algorithm is fully programmable.  If the program only changed every DAG epoch (roughly 5 days) certain miners could have time to develop hand-optimized versions of the random sequence, giving them an undue advantage.
 
+Sample code is written in C++, this should be kept in mind when evaluating the code in the specification.
+
+All numerics are computed using unsinged 32 bit integers.  Any overflows are trimmed off before proceeding to the next computation.  Languages that use numerics not fixed to bit lenghts (such as Python and JavaScript) or that only use signed integers (such as Java) will need to keep their languages' quirks in mind.  The extensive use of 32 bit data values aligns with modern GPUs internal data architectures.
+
 ProgPoW uses **FNV1a** for merging data. The existing Ethash uses FNV1 for merging, but FNV1a provides better distribution properties.
 
-ProgPow uses [KISS99](https://en.wikipedia.org/wiki/KISS_(algorithm)) for random number generation. This is the simplest (fewest instruction) random generator that passes the TestU01 statistical test suite.  A more complex random number generator like Mersenne Twister can be efficiently implemented on a specialized ASIC, providing an opportunity for efficiency gains.
+Test vectors can be found [in the test vectors file](test-vectors.md#fnv1a).
 
 ```cpp
 const uint32_t FNV_PRIME = 0x1000193;
@@ -116,7 +120,13 @@ uint32_t fnv1a(uint32_t h, uint32_t d)
 {
     return (h ^ d) * FNV_PRIME;
 }
+```
 
+ProgPow uses [KISS99](https://en.wikipedia.org/wiki/KISS_(algorithm)) for random number generation. This is the simplest (fewest instruction) random generator that passes the TestU01 statistical test suite.  A more complex random number generator like Mersenne Twister can be efficiently implemented on a specialized ASIC, providing an opportunity for efficiency gains.
+
+Test vectors can be found [in the test vectors file](test-vectors.md#kiss99).
+
+```cpp
 typedef struct {
     uint32_t z, w, jsr, jcong;
 } kiss99_t;
@@ -137,7 +147,9 @@ uint32_t kiss99(kiss99_t &st)
 }
 ```
 
-The `LANES*REGS` of mix data is initialized from the hash’s seed.
+The `fill_mix` function popilates an array of `int32` values used by each lane in the hash calculations.
+
+Test vectors can be found [in the test vectors file](test-vectors.md#fill_mix).
 
 ```cpp
 void fill_mix(
@@ -160,7 +172,9 @@ void fill_mix(
 
 Like ethash Keccak is used to seed the sequence per-nonce and to produce the final result.  The keccak-f800 variant is used as the 32-bit word size matches the native word size of modern GPUs.  The implementation is a variant of SHAKE with width=800, bitrate=576, capacity=224, output=256, and no padding.  The result of keccak is treated as a 256-bit big-endian number - that is result byte 0 is the MSB of the value.
 
-As with ethash the input and output of the keccak function are fixed and relatively small.  This means only a single "absorb" and "squeeze" phase are required.  See the [official Keccak specs](https://keccak.team/keccak_specs_summary.html) for more details.
+As with ethash the input and output of the keccak function are fixed and relatively small.  This means only a single "absorb" and "squeeze" phase are required.  For a pseudo-code imenentation of the `keccak_f800_round` function see the `Round[b](A,RC)` function in the "Pseudo-code description of the permutations" section of the [official Keccak specs](https://keccak.team/keccak_specs_summary.html).
+
+Test vectors can be found [in the test vectors file](test-vectors.md#keccak_f800_progpow).
 
 ```cpp
 hash32_t keccak_f800_progpow(hash32_t header, uint64_t seed, hash32_t digest)
@@ -192,62 +206,11 @@ hash32_t keccak_f800_progpow(hash32_t header, uint64_t seed, hash32_t digest)
 }
 ```
 
-The flow of the overall algorithm is:
-* A keccak hash of the header + nonce to create a seed
-* Use the seed to generate initial mix data
-* Loop multiple times, each time hashing random loads and random math into the mix data
-* Hash all the mix data into a single 256-bit value
-* A final keccak hash that is compared against the target
-
-```cpp
-bool progpow_search(
-    const uint64_t prog_seed, // value is (block_number/PROGPOW_PERIOD)
-    const uint64_t nonce,
-    const hash32_t header,
-    const hash32_t target, // miner can use a uint64_t target, doesn't need the full 256 bit target
-    const uint32_t *dag // gigabyte DAG located in framebuffer - the first portion gets cached
-)
-{
-    uint32_t mix[PROGPOW_LANES][PROGPOW_REGS];
-    hash32_t digest;
-    for (int i = 0; i < 8; i++)
-        digest.uint32s[i] = 0;
-
-    // keccak(header..nonce)
-    hash32_t seed_256 = keccak_f800_progpow(header, nonce, digest);
-    // endian swap so byte 0 of the hash is the MSB of the value
-    uint64_t seed = bswap(seed_256[0]) << 32 | bswap(seed_256[1]);
-
-    // initialize mix for all lanes
-    for (int l = 0; l < PROGPOW_LANES; l++)
-        fill_mix(seed, l, mix[l]);
-
-    // execute the randomly generated inner loop
-    for (int i = 0; i < PROGPOW_CNT_DAG; i++)
-        progPowLoop(prog_seed, i, mix, dag);
-
-    // Reduce mix data to a per-lane 32-bit digest
-    uint32_t digest_lane[PROGPOW_LANES];
-    for (int l = 0; l < PROGPOW_LANES; l++)
-    {
-        digest_lane[l] = FNV_OFFSET_BASIS
-        for (int i = 0; i < PROGPOW_REGS; i++)
-            digest_lane[l] = fnv1a(digest_lane[l], mix[l][i]);
-    }
-    // Reduce all lanes to a single 256-bit digest
-    for (int i = 0; i < 8; i++)
-        digest.uint32s[i] = FNV_OFFSET_BASIS;
-    for (int l = 0; l < PROGPOW_LANES; l++)
-        digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l])
-
-    // keccak(header .. keccak(header..nonce) .. digest);
-    return (keccak_f800_progpow(header, seed, digest) <= target);
-}
-```
-
 The inner loop uses FNV and KISS99 to generate a random sequence from the `prog_seed`.  This random sequence determines which mix state is accessed and what random math is performed.
 
 Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (50 blocks or about 12.5 minutes) it is expected that while mining `progPowLoop` will be evaluated on the CPU to generate source code for that period's sequence.  The source code will be compiled on the CPU before running on the GPU.  You can see an example sequence and generated source code in [kernel.cu](test/kernel.cu).
+
+Test vectors can be found [in the test vectors file](test-vectors.md#progPowInit).
 
 ```cpp
 kiss99_t progPowInit(uint64_t prog_seed, int mix_seq_dst[PROGPOW_REGS], int mix_seq_src[PROGPOW_REGS])
@@ -280,6 +243,8 @@ kiss99_t progPowInit(uint64_t prog_seed, int mix_seq_dst[PROGPOW_REGS], int mix_
 
 The math operations that merges values into the mix data are ones chosen to maintain entropy.
 
+Test vectors can be found [in the test vectors file](test-vectors.md#math).
+
 ```cpp
 // Merge new data from b into the value in a
 // Assuming A has high entropy only do ops that retain entropy
@@ -299,6 +264,8 @@ uint32_t merge(uint32_t a, uint32_t b, uint32_t r)
 ```
 
 The math operations chosen for the random math are ones that are easy to implement in CUDA and OpenCL, the two main programming languages for commodity GPUs. The [mul_hi](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/mul_hi.html), [min](https://www.khronos.org/registry/OpenCL/sdk/2.0/docs/man/xhtml/integerMax.html), [clz](https://www.khronos.org/registry/OpenCL/sdk/1.1/docs/man/xhtml/clz.html), and [popcount](https://www.khronos.org/registry/OpenCL/sdk/2.0/docs/man/xhtml/popcount.html) functions match the corresponding OpenCL functions.  ROTL32 matches the OpenCL [rotate](https://www.khronos.org/registry/OpenCL/sdk/1.0/docs/man/xhtml/rotate.html) function.  ROTR32 is rotate right, which is equivalent to `rotate(i, 32-v)`.
+
+Test vectors can be found [in the test vectors file](test-vectors.md#math).
 
 ```cpp
 // Random math between two input values
@@ -321,7 +288,6 @@ uint32_t math(uint32_t a, uint32_t b, uint32_t r)
 }
 ```
 
-The inner loop.  `DAG_BYTES` is set to the number of bytes in the current DAG, which is generated identically to the existing ethash algorithm.
 
 The flow of the inner loop is:
 * Lane `(loop % LANES)` is chosen as the leader for that loop iteration
@@ -329,6 +295,12 @@ The flow of the inner loop is:
 * Each lane reads `DAG_LOADS` sequential words, using `(lane ^ loop) % LANES` as the starting offset within the entry.
 * The random sequence of math and cache accesses is performed
 * The DAG data read at the start of the loop is merged at the end of the loop
+
+`prog_seed` and `loop` come from the outer loop, corresponding to a value from a `kiss99` funtion call and the loop iteration number.  `mix` is the array filled by `fill_mix` for the block. `dag` is the bytes of the ethash DAG grouped into 32 bit unsigned ints in litte-endian format.  On little-endian architectures this is just a normal int32 pointer to the existing DAG.
+
+`DAG_BYTES` is set to the number of bytes in the current DAG, which is generated identically to the existing ethash algorithm.  
+
+Test vectors can be found [in the test vectors file](test-vectors.md#progPowLoop).
 
 ```cpp
 void progPowLoop(
@@ -408,6 +380,60 @@ void progPowLoop(
 }
 ```
 
+The flow of the overall algorithm is:
+* A keccak hash of the header + nonce to create a seed
+* Use the seed to generate initial mix data
+* Loop multiple times, each time hashing random loads and random math into the mix data
+* Hash all the mix data into a single 256-bit value
+* A final keccak hash is computed
+* When mining this final value is compared against a `hash32_t` target
+
+```cpp
+hash32_t progPowHash(
+    const uint64_t prog_seed, // value is (block_number/PROGPOW_PERIOD)
+    const uint64_t nonce,
+    const hash32_t header,
+    const uint32_t *dag // gigabyte DAG located in framebuffer - the first portion gets cached
+)
+{
+    uint32_t mix[PROGPOW_LANES][PROGPOW_REGS];
+    hash32_t digest;
+    for (int i = 0; i < 8; i++)
+        digest.uint32s[i] = 0;
+
+    // keccak(header..nonce)
+    hash32_t seed_256 = keccak_f800_progpow(header, nonce, digest);
+    // endian swap so byte 0 of the hash is the MSB of the value
+    uint64_t seed = bswap(seed_256[0]) << 32 | bswap(seed_256[1]);
+
+    // initialize mix for all lanes
+    for (int l = 0; l < PROGPOW_LANES; l++)
+        fill_mix(seed, l, mix[l]);
+
+    // execute the randomly generated inner loop
+    for (int i = 0; i < PROGPOW_CNT_DAG; i++)
+        progPowLoop(prog_seed, i, mix, dag);
+
+    // Reduce mix data to a per-lane 32-bit digest
+    uint32_t digest_lane[PROGPOW_LANES];
+    for (int l = 0; l < PROGPOW_LANES; l++)
+    {
+        digest_lane[l] = FNV_OFFSET_BASIS
+        for (int i = 0; i < PROGPOW_REGS; i++)
+            digest_lane[l] = fnv1a(digest_lane[l], mix[l][i]);
+    }
+    // Reduce all lanes to a single 256-bit digest
+    for (int i = 0; i < 8; i++)
+        digest.uint32s[i] = FNV_OFFSET_BASIS;
+    for (int l = 0; l < PROGPOW_LANES; l++)
+        digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l])
+
+    // keccak(header .. keccak(header..nonce) .. digest);
+    keccak_f800_progpow(header, seed, digest);
+}
+```
+
+
 ## Example / Testcase
 
 The random sequence generated for block 30,000 (prog_seed 600) can been seen in [kernel.cu](test/kernel.cu).
@@ -418,10 +444,13 @@ header ffeeddccbbaa9988776655443322110000112233445566778899aabbccddeeff
 nonce 123456789abcdef0
 
 digest: 11f19805c58ab46610ff9c719dcf0a5f18fa2f1605798eef770c47219274767d
-result (top 64 bits): 5b7ccd472dbefdd9
+result: 5b7ccd472dbefdd95b895cac8ece67ff0deb5a6bd2ecc6e162383d00c3728ece
 ```
 
-A full run showing intermediate values can be seen in [result.log](test/result.log)
+A full run showing some intermediate values can be seen in [result.log](test/result.log)
+
+Additional test vectors can be found [in the test vectors file](test-vectors.md#progPowHash).
+
 
 
 ## Change History
