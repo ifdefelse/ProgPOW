@@ -108,7 +108,7 @@ Sample code is written in C++, this should be kept in mind when evaluating the c
 
 All numerics are computed using unsinged 32 bit integers.  Any overflows are trimmed off before proceeding to the next computation.  Languages that use numerics not fixed to bit lenghts (such as Python and JavaScript) or that only use signed integers (such as Java) will need to keep their languages' quirks in mind.  The extensive use of 32 bit data values aligns with modern GPUs internal data architectures.
 
-ProgPoW uses **FNV1a** for merging data. The existing Ethash uses FNV1 for merging, but FNV1a provides better distribution properties.
+ProgPoW uses a 32-bit variant of **FNV1a** for merging data. The existing Ethash uses a similar vaiant of FNV1 for merging, but FNV1a provides better distribution properties.
 
 Test vectors can be found [in the test vectors file](test-vectors.md#fnv1a).
 
@@ -147,7 +147,7 @@ uint32_t kiss99(kiss99_t &st)
 }
 ```
 
-The `fill_mix` function popilates an array of `int32` values used by each lane in the hash calculations.
+The `fill_mix` function populates an array of `int32` values used by each lane in the hash calculations.
 
 Test vectors can be found [in the test vectors file](test-vectors.md#fill_mix).
 
