@@ -334,7 +334,7 @@ loop 1 are as follows.
 > 0xB33749CA, 0x5D2E87F7, 0x0F3C39DB, 0x3CAE9895
 > ```
 
-##progPowHash
+## progPowHash
 
 Block 30000:
 
