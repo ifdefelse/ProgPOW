@@ -72,7 +72,7 @@ Test case 2:
 
 ## progPowInit
 
-For ProgPow Epock 600 (block 30,000) the configurations should be
+For ProgPow period 600 (block 30,000) the configurations should be
 
 src array:
 
