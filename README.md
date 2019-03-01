@@ -93,14 +93,28 @@ The DAG is generated exactly as in ethash.  All the parameters (ephoch length, D
 
 ProgPoW can be tuned using the following parameters.  The proposed settings have been tuned for a range of existing, commodity GPUs:
 
-* `PROGPOW_PERIOD`: Number of blocks before changing the random program; default is `50`.
-* `PROGPOW_LANES`: The number of parallel lanes that coordinate to calculate a single hash instance; default is `16`.
-* `PROGPOW_REGS`: The register file usage size; default is `32`.
-* `PROGPOW_DAG_LOADS`: Number of uint32 loads from the DAG per lane; default is `4`;
-* `PROGPOW_CACHE_BYTES`: The size of the cache; default is `16 x 1024`.
-* `PROGPOW_CNT_DAG`: The number of DAG accesses, defined as the outer loop of the algorithm; default is `64` (same as Ethash).
-* `PROGPOW_CNT_CACHE`: The number of cache accesses per loop; default is `12`.
-* `PROGPOW_CNT_MATH`: The number of math operations per loop; default is `20`.
+* `PROGPOW_PERIOD`: Number of blocks before changing the random program
+* `PROGPOW_LANES`: The number of parallel lanes that coordinate to calculate a single hash instance
+* `PROGPOW_REGS`: The register file usage size
+* `PROGPOW_DAG_LOADS`: Number of uint32 loads from the DAG per lane
+* `PROGPOW_CACHE_BYTES`: The size of the cache
+* `PROGPOW_CNT_DAG`: The number of DAG accesses, defined as the outer loop of the algorithm (64 is the same as ethash)
+* `PROGPOW_CNT_CACHE`: The number of cache accesses per loop
+* `PROGPOW_CNT_MATH`: The number of math operations per loop
+
+The value of these parameters has been tweaked between version 0.9.2 (live on the gangnum testnet) and 0.9.3 (proposed for Ethereum adoption).  See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
+
+| Parameter             | 0.9.2 | 0.9.3 |
+|-----------------------|-------|-------|
+| `PROGPOW_PERIOD`      | `50`  | `10`  |
+| `PROGPOW_LANES`       | `16`  | `16`  |
+| `PROGPOW_REGS`        | `32`  | `32`  |
+| `PROGPOW_DAG_LOADS`   | `4`   | `4`   |
+| `PROGPOW_CACHE_BYTES` | `16x1024` | `16x1024` |
+| `PROGPOW_CNT_DAG`     | `64`  | `64`  |
+| `PROGPOW_CNT_CACHE`   | `12`  | `11`  |
+| `PROGPOW_CNT_MATH`    | `20`  | `18`  |
+
 
 The random program changes every `PROGPOW_PERIOD` blocks (default `50`, roughly 12.5 minutes) to ensure the hardware executing the algorithm is fully programmable.  If the program only changed every DAG epoch (roughly 5 days) certain miners could have time to develop hand-optimized versions of the random sequence, giving them an undue advantage.
 
@@ -455,7 +469,8 @@ Additional test vectors can be found [in the test vectors file](test-vectors.md#
 
 ## Change History
 
-- 0.9.2 (current) - Unique sources for math() and prevent rotation by 0 in merge().  Suggested by [SChernykh](https://github.com/ifdefelse/ProgPOW/issues/19)
+- 0.9.3 (proposed) - Reduce parameters PERIOD, CNT_MATH, and CNT_CACHE. See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
+- [0.9.2](https://github.com/ifdefelse/ProgPOW/blob/0e39b62deb0c9ab14900fc404fcb19cac70240e1/README.md) - Unique sources for math() and prevent rotation by 0 in merge().  Suggested by [SChernykh](https://github.com/ifdefelse/ProgPOW/issues/19)
 - [0.9.1](https://github.com/ifdefelse/ProgPOW/blob/60bba1c3fdad6a54539fc3e9f05727547de9c58c/README.md) - Shuffle what part of the DAG entry each lane accesses. Suggested by [mbevand](https://github.com/ifdefelse/ProgPOW/pull/13)
 - [0.9.0](https://github.com/ifdefelse/ProgPOW/blob/a3f62349a1513f0393524683f9671cfe17cca895/README.md) - Unique cache address sources, re-tune parameters
 - [0.8.0](https://github.com/ifdefelse/ProgPOW/blob/620b4c7aafe60391f863372814d7517e94386379/README.md) - Original spec
