@@ -102,7 +102,7 @@ ProgPoW can be tuned using the following parameters.  The proposed settings have
 * `PROGPOW_CNT_CACHE`: The number of cache accesses per loop
 * `PROGPOW_CNT_MATH`: The number of math operations per loop
 
-The value of these parameters has been tweaked between version 0.9.2 (live on the gangnum testnet) and 0.9.3 (proposed for Ethereum adoption).  See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
+The value of these parameters has been tweaked between version 0.9.2 (live on the Gangnam testnet) and 0.9.3 (proposed for Ethereum adoption).  See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
 
 | Parameter             | 0.9.2 | 0.9.3 |
 |-----------------------|-------|-------|
