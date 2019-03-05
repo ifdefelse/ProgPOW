@@ -167,7 +167,7 @@ Test vectors can be found [in the test vectors file](test-vectors.md#fill_mix).
 
 ```cpp
 void fill_mix(
-    uint64_t hash_seed,
+    uint64_t seed,
     uint32_t lane_id,
     uint32_t mix[PROGPOW_REGS]
 )
@@ -418,7 +418,7 @@ hash32_t progPowHash(
     // keccak(header..nonce)
     hash32_t seed_256 = keccak_f800_progpow(header, nonce, digest);
     // endian swap so byte 0 of the hash is the MSB of the value
-    uint64_t seed = bswap(seed_256[0]) << 32 | bswap(seed_256[1]);
+    uint64_t seed = ((uint64_t)bswap(seed_256.uint32s[0]) << 32) | bswap(seed_256.uint32s[1]);
 
     // initialize mix for all lanes
     for (int l = 0; l < PROGPOW_LANES; l++)
@@ -432,7 +432,7 @@ hash32_t progPowHash(
     uint32_t digest_lane[PROGPOW_LANES];
     for (int l = 0; l < PROGPOW_LANES; l++)
     {
-        digest_lane[l] = FNV_OFFSET_BASIS
+        digest_lane[l] = FNV_OFFSET_BASIS;
         for (int i = 0; i < PROGPOW_REGS; i++)
             digest_lane[l] = fnv1a(digest_lane[l], mix[l][i]);
     }
@@ -440,10 +440,12 @@ hash32_t progPowHash(
     for (int i = 0; i < 8; i++)
         digest.uint32s[i] = FNV_OFFSET_BASIS;
     for (int l = 0; l < PROGPOW_LANES; l++)
-        digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l])
+        digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l]);
 
     // keccak(header .. keccak(header..nonce) .. digest);
     keccak_f800_progpow(header, seed, digest);
+    
+    return digest;
 }
 ```
 
