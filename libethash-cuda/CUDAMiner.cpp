@@ -124,7 +124,7 @@ void CUDAMiner::workLoop()
 				if (old_period_seed != period_seed)
 				{
 					uint64_t dagBytes = ethash_get_datasize(w.height);
-					uint32_t dagElms   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+					uint32_t dagElms   = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
 					compileKernel(w.height, dagElms);
 				}
 				old_period_seed = period_seed;
@@ -356,7 +356,7 @@ bool CUDAMiner::cuda_init(
 		m_streams = new cudaStream_t[s_numStreams];
 
 		uint64_t dagBytes = ethash_get_datasize(_light->block_number);
-		uint32_t dagElms   = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+		uint32_t dagElms   = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
 		uint32_t lightWords = (unsigned)(_lightBytes / sizeof(node));
 
 		CUDA_SAFE_CALL(cudaSetDevice(m_device_num));

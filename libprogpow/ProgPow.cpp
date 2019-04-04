@@ -86,7 +86,7 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
 
 	if (kern == KERNEL_CUDA)
 	{
-        ret << "typedef struct __align__(16) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
+        ret << "typedef struct __align__(PROGPOW_DAG_LOADS * 4) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
         ret << "\n";
         ret << "// Inner loop for prog_seed " << prog_seed << "\n";
         ret << "__device__ __forceinline__ void progPowLoop(const uint32_t loop,\n";
@@ -97,7 +97,7 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
 	}
 	else
 	{
-        ret << "typedef struct __attribute__ ((aligned (16))) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
+        ret << "typedef struct __attribute__ ((aligned (PROGPOW_DAG_LOADS * 4))) {uint32_t s[PROGPOW_DAG_LOADS];} dag_t;\n";
         ret << "\n";
         ret << "// Inner loop for prog_seed " << prog_seed << "\n";
         ret << "void progPowLoop(const uint32_t loop,\n";

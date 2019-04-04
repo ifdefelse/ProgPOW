@@ -597,7 +597,7 @@ bool CLMiner::init(int epoch)
 			m_globalWorkSize = ((m_globalWorkSize / m_workgroupSize) + 1) * m_workgroupSize;
 
 		uint64_t dagBytes = ethash_get_datasize(light->light->block_number);
-		uint32_t dagElms = (unsigned)(dagBytes / ETHASH_MIX_BYTES);
+		uint32_t dagElms = (unsigned)(dagBytes / (PROGPOW_LANES * PROGPOW_DAG_LOADS * 4));
 		uint32_t lightWords = (unsigned)(light->data().size() / sizeof(node));
 
 		// patch source code
