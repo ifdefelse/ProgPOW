@@ -2,7 +2,7 @@
 
 [![Join the chat at https://gitter.im/ifdefelse/community](https://badges.gitter.im/ifdefelse/community.svg)](https://gitter.im/ifdefelse/community?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)[![Follow us](https://img.shields.io/twitter/follow/IfDefElse_.svg)](https://twitter.com/IfDefElse_)
 
-ProgPoW is a proof-of-work algorithm designed to close the efficency gap available to specialized ASICs. It utilizes almost all parts of commodity hardware (GPUs), and comes pre-tuned for the most common hardware utilized in the Ethereum network. 
+ProgPoW is a proof-of-work algorithm designed to close the efficiency gap available to specialized ASICs. It utilizes almost all parts of commodity hardware (GPUs), and comes pre-tuned for the most common hardware utilized in the Ethereum network.
 
 Ever since the first bitcoin mining ASIC was released, many new Proof of Work algorithms have been created with the intention of being “ASIC-resistant”. The goal of “ASIC-resistance” is to resist the centralization of PoW mining power such that these coins couldn’t be so easily manipulated by a few players. 
 
@@ -38,7 +38,7 @@ With the growth of large mining pools, the control of hashing power has been del
 
 While the goal of “ASIC resistance” is valuable, the entire concept of “ASIC resistance” is a bit of a fallacy.  CPUs and GPUs are themselves ASICs.  Any algorithm that can run on a commodity ASIC (a CPU or GPU) by definition can have a customized ASIC created for it with slightly less functionality. Some algorithms are intentionally made to be  “ASIC friendly” - where an ASIC implementation is drastically more efficient than the same algorithm running on general purpose hardware. The protection that this offers when the coin is unknown also makes it an attractive target for a dedicate mining ASIC company as soon as it becomes useful.
 
-Therefore, ASIC resistance is: the efficiency difference of specilized hardware versus hardware that has a wider adoption and applicability.  A smaller efficiency difference between custom vs general hardware mean higher resistance and a better algorithm. This efficiency difference is the proper metric to use when comparing the quality of PoW algorithms.  Efficiency could mean absolute performance, performance per watt, or performance per dollar - they are all highly correlated.  If a single entity creates and controls an ASIC that is drastically more efficient, they can gain 51% of the network hashrate and possibly stage an attack.
+Therefore, ASIC resistance is: the efficiency difference of specialized hardware versus hardware that has a wider adoption and applicability.  A smaller efficiency difference between custom vs general hardware mean higher resistance and a better algorithm. This efficiency difference is the proper metric to use when comparing the quality of PoW algorithms.  Efficiency could mean absolute performance, performance per watt, or performance per dollar - they are all highly correlated.  If a single entity creates and controls an ASIC that is drastically more efficient, they can gain 51% of the network hashrate and possibly stage an attack.
 
 ## Review of Existing PoW Algorithms
 
@@ -89,7 +89,7 @@ Ethash requires external memory due to the large size of the DAG.  However that 
 
 ## ProgPoW Algorithm Walkthrough
 
-The DAG is generated exactly as in Ethash.  All the parameters (ephoch length, DAG size, etc) are unchanged.  See the original [Ethash](https://github.com/ethereum/wiki/wiki/Ethash) spec for details on generating the DAG.
+The DAG is generated exactly as in Ethash.  All the parameters (epoch length, DAG size, etc) are unchanged.  See the original [Ethash](https://github.com/ethereum/wiki/wiki/Ethash) spec for details on generating the DAG.
 
 ProgPoW can be tuned using the following parameters.  The proposed settings have been tuned for a range of existing, commodity GPUs:
 
@@ -120,9 +120,9 @@ The random program changes every `PROGPOW_PERIOD` blocks (default `50`, roughly 
 
 Sample code is written in C++, this should be kept in mind when evaluating the code in the specification.
 
-All numerics are computed using unsinged 32 bit integers.  Any overflows are trimmed off before proceeding to the next computation.  Languages that use numerics not fixed to bit lenghts (such as Python and JavaScript) or that only use signed integers (such as Java) will need to keep their languages' quirks in mind.  The extensive use of 32 bit data values aligns with modern GPUs internal data architectures.
+All numerics are computed using unsigned 32 bit integers.  Any overflows are trimmed off before proceeding to the next computation.  Languages that use numerics not fixed to bit lengths (such as Python and JavaScript) or that only use signed integers (such as Java) will need to keep their languages' quirks in mind.  The extensive use of 32 bit data values aligns with modern GPUs internal data architectures.
 
-ProgPoW uses a 32-bit variant of **FNV1a** for merging data. The existing Ethash uses a similar vaiant of FNV1 for merging, but FNV1a provides better distribution properties.
+ProgPoW uses a 32-bit variant of **FNV1a** for merging data. The existing Ethash uses a similar variant of FNV1 for merging, but FNV1a provides better distribution properties.
 
 Test vectors can be found [in the test vectors file](test-vectors.md#fnv1a).
 
@@ -186,7 +186,7 @@ void fill_mix(
 
 Like Ethash Keccak is used to seed the sequence per-nonce and to produce the final result.  The keccak-f800 variant is used as the 32-bit word size matches the native word size of modern GPUs.  The implementation is a variant of SHAKE with width=800, bitrate=576, capacity=224, output=256, and no padding.  The result of keccak is treated as a 256-bit big-endian number - that is result byte 0 is the MSB of the value.
 
-As with Ethash the input and output of the keccak function are fixed and relatively small.  This means only a single "absorb" and "squeeze" phase are required.  For a pseudo-code imenentation of the `keccak_f800_round` function see the `Round[b](A,RC)` function in the "Pseudo-code description of the permutations" section of the [official Keccak specs](https://keccak.team/keccak_specs_summary.html).
+As with Ethash the input and output of the keccak function are fixed and relatively small.  This means only a single "absorb" and "squeeze" phase are required.  For a pseudo-code implementation of the `keccak_f800_round` function see the `Round[b](A,RC)` function in the "Pseudo-code description of the permutations" section of the [official Keccak specs](https://keccak.team/keccak_specs_summary.html).
 
 Test vectors can be found [in the test vectors file](test-vectors.md#keccak_f800_progpow).
 
