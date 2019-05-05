@@ -443,9 +443,7 @@ hash32_t progPowHash(
         digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l]);
 
     // keccak(header .. keccak(header..nonce) .. digest);
-    keccak_f800_progpow(header, seed, digest);
-    
-    return digest;
+    return keccak_f800_progpow(header, seed, digest);
 }
 ```
 
