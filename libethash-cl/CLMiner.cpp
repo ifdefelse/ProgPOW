@@ -284,13 +284,15 @@ void CLMiner::workLoop()
 	// The work package currently processed by GPU.
 	WorkPackage current;
 	current.header = h256{1u};
+	uint64_t old_period_seed = -1;
 
 	try {
 		while (!shouldStop())
 		{
 			const WorkPackage w = work();
+			uint64_t period_seed = w.height / PROGPOW_PERIOD;
 
-			if (current.header != w.header)
+			if (current.header != w.header || current.epoch != w.epoch || old_period_seed != period_seed)
 			{
 				// New work received. Update GPU data.
 				if (!w)
@@ -302,7 +304,7 @@ void CLMiner::workLoop()
 
 				//cllog << "New work: header" << w.header << "target" << w.boundary.hex();
 
-				if (current.epoch != w.epoch)
+				if (current.epoch != w.epoch || old_period_seed != period_seed)
 				{
 					if (s_dagLoadMode == DAG_LOAD_MODE_SEQUENTIAL)
 					{
@@ -311,8 +313,8 @@ void CLMiner::workLoop()
 						++s_dagLoadIndex;
 					}
 
-					cllog << "New epoch: " << w.epoch;
-					init(w.epoch);
+					cllog << "New epoch " << w.epoch << "/ period " << period_seed;
+					init(w.epoch, w.height, current.epoch != w.epoch, old_period_seed != period_seed);
 				}
 
 				// Upper 64 bits of the boundary.
@@ -369,6 +371,8 @@ void CLMiner::workLoop()
 					cwarn << "FAILURE: GPU gave incorrect result!";
 				}
 			}
+
+			old_period_seed = period_seed;
 
 			current = w;        // kernel now processing newest work
 			current.startNonce = startNonce;
@@ -500,8 +504,10 @@ bool CLMiner::configureGPU(
 	return false;
 }
 
-bool CLMiner::init(int epoch)
+bool CLMiner::init(int epoch, uint64_t block_number, bool new_epoch, bool new_period)
 {
+	assert(new_epoch || new_period);
+
 	EthashAux::LightType light = EthashAux::light(epoch);
 
 	// get all platforms
@@ -604,7 +610,7 @@ bool CLMiner::init(int epoch)
 		// note: The kernels here are simply compiled version of the respective .cl kernels
 		// into a byte array by bin2h.cmake. There is no need to load the file by hand in runtime
 		// See libethash-cl/CMakeLists.txt: add_custom_command()
-        std::string code = ProgPow::getKern(light->light->block_number, ProgPow::KERNEL_CL);
+		std::string code = ProgPow::getKern(block_number, ProgPow::KERNEL_CL);
 		code += string(CLMiner_kernel, sizeof(CLMiner_kernel));
 
 		addDefinition(code, "GROUP_SIZE", m_workgroupSize);
@@ -671,6 +677,9 @@ bool CLMiner::init(int epoch)
 		m_searchKernel.setArg(1, m_header);
 		m_searchKernel.setArg(2, m_dag);
 		m_searchKernel.setArg(5, 0);
+
+		if (!new_epoch)
+			return true;
 
 		// create mining buffers
 		ETHCL_LOG("Creating mining buffer");
