@@ -198,7 +198,9 @@ __kernel void ethash_search(
         // initialize mix for all lanes
         fill_mix(hash_seed, lane_id, mix);
 
-        #pragma unroll 1
+        // Apparently, no unrolling ("#pragma unroll 1") often results in
+        // miscompiles with AMD OpenCL, so use at least 2
+        #pragma unroll 2
         for (uint32_t l = 0; l < PROGPOW_CNT_DAG; l++)
             progPowLoop(l, mix, g_dag, c_dag, share[0].uint64s, hack_false);
 
