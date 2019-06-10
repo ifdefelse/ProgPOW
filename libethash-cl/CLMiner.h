@@ -85,7 +85,7 @@ protected:
 private:
 	void workLoop() override;
 
-	bool init(int epoch);
+	bool init(int epoch, uint64_t block_number, bool new_epoch, bool new_period);
 
 	cl::Context m_context;
 	cl::CommandQueue m_queue;
