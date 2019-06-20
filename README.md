@@ -8,6 +8,28 @@ Ever since the first bitcoin mining ASIC was released, many new Proof of Work al
 
 This document presents an overview of the algorithm and examines what it means to be “ASIC-resistant.” Next, we compare existing PoW designs by analyzing how each algorithm executes in hardware. Finally, we present the detailed implementation by walking through the code.
 
+## Build and Test Instructions
+
+After cloning this repository into `ProgPOW`, it can be built with commands like:
+
+```
+cd ProgPOW
+git submodule update --init --recursive
+mkdir build
+cd build
+cmake .. -DETHASHCUDA=ON
+make -sj8
+```
+
+and benchmarked with commands like:
+
+```
+ethminer/ethminer -U -M 10000000
+ethminer/ethminer -G -M 10000000
+```
+
+which use CUDA and OpenCL, respectively.
+
 ## ProgPoW Overview
 The design goal of ProgPoW is to have the algorithm’s requirements match what is available on commodity GPUs:  If the algorithm were to be implemented on a custom ASIC there should be little opportunity for efficiency gains compared to a commodity GPU.
 
@@ -449,6 +471,8 @@ hash32_t progPowHash(
 
 
 ## Example / Testcase
+
+For ProgPoW 0.9.2:
 
 The random sequence generated for block 30,000 (prog_seed 600) can been seen in [kernel.cu](test/kernel.cu).
 
