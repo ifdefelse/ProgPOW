@@ -13,9 +13,9 @@ cable_configure_toolchain(DEFAULT cxx11)
 
 set(HUNTER_CONFIGURATION_TYPES Release)
 HunterGate(
-    URL "https://github.com/ruslo/hunter/archive/v0.20.34.tar.gz"
-    SHA1 "2f04d1beffdf39db1c40d8347beb8c10bbe9b8ed"
-    LOCAL
+    URL "https://github.com/ruslo/hunter/archive/v0.23.197.tar.gz"
+    SHA1 "f494a08bc9bb489527be1240d223d3ff69ece322"
+	LOCAL
 )
 
 project(ethminer)
