@@ -74,7 +74,7 @@ bool CUDAMiner::init(int epoch)
 		cuda_init(getNumDevices(), light->light, lightData.data(), lightData.size(),
 			device, (s_dagLoadMode == DAG_LOAD_MODE_SINGLE), s_dagInHostMemory, s_dagCreateDevice);
 		s_dagLoadIndex++;
-    
+
 		if (s_dagLoadMode == DAG_LOAD_MODE_SINGLE)
 		{
 			if (s_dagLoadIndex >= s_numInstances && s_dagInHostMemory)
@@ -369,7 +369,7 @@ bool CUDAMiner::cuda_init(
 				cudalog <<  "CUDA device " << string(device_props.name) << " has insufficient GPU memory." << device_props.totalGlobalMem << " bytes of memory found < " << dagBytes << " bytes of memory required";
 				return false;
 			}
-			//We need to reset the device and recreate the dag  
+			//We need to reset the device and recreate the dag
 			cudalog << "Resetting device";
 			CUDA_SAFE_CALL(cudaDeviceReset());
 			CUdevice device;
@@ -379,23 +379,23 @@ bool CUDAMiner::cuda_init(
 			//We need to reset the light and the Dag for the following code to reallocate
 			//since cudaDeviceReset() frees all previous allocated memory
 			m_light[m_device_num] = nullptr;
-			m_dag = nullptr; 
+			m_dag = nullptr;
 		}
 		// create buffer for cache
 		hash64_t * dag = m_dag;
 		hash64_t * light = m_light[m_device_num];
 
-		if(!light){ 
+		if(!light){
 			cudalog << "Allocating light with size: " << _lightBytes;
 			CUDA_SAFE_CALL(cudaMalloc(reinterpret_cast<void**>(&light), _lightBytes));
 		}
 		// copy lightData to device
 		CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(light), _lightData, _lightBytes, cudaMemcpyHostToDevice));
 		m_light[m_device_num] = light;
-		
+
 		if(dagElms != m_dag_elms || !dag) // create buffer for dag
 			CUDA_SAFE_CALL(cudaMalloc(reinterpret_cast<void**>(&dag), dagBytes));
-		
+
 		if(dagElms != m_dag_elms || !dag)
 		{
 			// create mining buffers
@@ -405,7 +405,7 @@ bool CUDAMiner::cuda_init(
 				CUDA_SAFE_CALL(cudaMallocHost(&m_search_buf[i], sizeof(search_results)));
 				CUDA_SAFE_CALL(cudaStreamCreate(&m_streams[i]));
 			}
-			
+
 			memset(&m_current_header, 0, sizeof(hash32_t));
 			m_current_target = 0;
 			m_current_nonce = 0;
@@ -429,7 +429,7 @@ bool CUDAMiner::cuda_init(
 					}
 				}else{
 					while(!hostDAG)
-						this_thread::sleep_for(chrono::milliseconds(100)); 
+						this_thread::sleep_for(chrono::milliseconds(100));
 					goto cpyDag;
 				}
 			}
@@ -441,7 +441,7 @@ cpyDag:
 				CUDA_SAFE_CALL(cudaMemcpy(reinterpret_cast<void*>(dag), hdag, dagBytes, cudaMemcpyHostToDevice));
 			}
 		}
-    
+
 		m_dag = dag;
 		m_dag_elms = dagElms;
 

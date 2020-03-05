@@ -159,7 +159,7 @@ std::string ProgPow::getKern(uint64_t block_number, kernel_t kern)
 		if (i < PROGPOW_CNT_MATH)
 		{
 			// Random Math
-            // Generate 2 unique sources 
+            // Generate 2 unique sources
             int src_rnd = rnd() % ((PROGPOW_REGS - 1) * PROGPOW_REGS);
             int src1 = src_rnd % PROGPOW_REGS; // 0 <= src1 < PROGPOW_REGS
             int src2 = src_rnd / PROGPOW_REGS; // 0 <= src2 < PROGPOW_REGS - 1

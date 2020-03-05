@@ -139,7 +139,7 @@ __device__ __forceinline__ void fill_mix(uint64_t seed, uint32_t lane_id, uint32
         mix[i] = kiss99(st);
 }
 
-__global__ void 
+__global__ void
 progpow_search(
     uint64_t start_nonce,
     const hash32_t header,
