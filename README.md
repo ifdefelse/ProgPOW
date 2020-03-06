@@ -196,13 +196,14 @@ void fill_mix(
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
+    uint32_t fnv_hash = FNV_OFFSET_BASIS;
     kiss99_t st;
-    st.z = fnv1a(FNV_OFFSET_BASIS, seed);
-    st.w = fnv1a(st.z, seed >> 32);
-    st.jsr = fnv1a(st.w, lane_id);
-    st.jcong = fnv1a(st.jsr, lane_id);
+    st.z = fnv1a(fnv_hash, seed);
+    st.w = fnv1a(fnv_hash, seed >> 32);
+    st.jsr = fnv1a(fnv_hash, lane_id);
+    st.jcong = fnv1a(fnv_hash, lane_id);
     for (int i = 0; i < PROGPOW_REGS; i++)
-            mix[i] = kiss99(st);
+        mix[i] = kiss99(st);
 }
 ```
 
