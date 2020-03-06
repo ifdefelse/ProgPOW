@@ -114,7 +114,7 @@ __device__ __forceinline__ uint32_t kiss99(kiss99_t &st)
     return ((MWC^st.jcong) + st.jsr);
 }
 
-__device__ __forceinline__ void fill_mix(const hash32_t* header, uint32_t lane_id, uint32_t mix[PROGPOW_REGS])
+__device__ __forceinline__ void fill_mix(const hash32_t header, uint64_t hash_seed, uint32_t lane_id, uint32_t mix[PROGPOW_REGS])
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
@@ -122,8 +122,8 @@ __device__ __forceinline__ void fill_mix(const hash32_t* header, uint32_t lane_i
     kiss99_t st;
     st.z = fnv1a(fnv_hash, header.uint32s[0]);
     st.w = fnv1a(fnv_hash, header.uint32s[1]);
-    st.jsr = fnv1a(fnv_hash, lane_id);
-    st.jcong = fnv1a(fnv_hash, lane_id);
+    st.jsr = fnv1a(fnv_hash, ROTL32(hash_seed, lane_id));
+    st.jcong = fnv1a(fnv_hash, ROTL32(hash_seed >> 32, lane_id));
     #pragma unroll
     for (int i = 0; i < PROGPOW_REGS; i++)
         mix[i] = kiss99(st);
@@ -157,7 +157,7 @@ progpow_search(
     __syncthreads();
 
     uint32_t state[25];  // Keccak's state
-    hash32_t digest;     // Carry-over from keccak's output
+    hash32_t digest;     // Carry-over from mix output
 
     // Absorb phase for initial round of keccak
     // 1st fill with header data (8 words)
@@ -171,7 +171,7 @@ progpow_search(
         state[i] = 0;
 
     // Run intial keccak round
-    keccak_f800(&state);
+    keccak_f800(state);
 
     // Main loop
     #pragma unroll 1
@@ -179,9 +179,13 @@ progpow_search(
     {
         uint32_t mix[PROGPOW_REGS];
 
+        // share the first two words of digest across all lanes
+        uint64_t hash_seed = (uint64_t)state[0] << 32 | state[1];
+        hash_seed = __shfl_sync(0xFFFFFFFF, hash_seed, h, PROGPOW_LANES);
+
         // initialize mix for all lanes using first
         // two words from header_hash
-        fill_mix(header, lane_id, mix);
+        fill_mix(header, hash_seed, lane_id, mix);
 
         #pragma unroll 1
         for (uint32_t l = 0; l < PROGPOW_CNT_DAG; l++)
@@ -220,7 +224,7 @@ progpow_search(
         state[i] = 0;
 
     // Run keccak loop
-    keccak_f800(&state);
+    keccak_f800(state);
 
     // Extract result, swap endianness, and compare with target
     uint64_t result = (uint64_t)cuda_swab32(state[0]) << 32 | cuda_swab32(state[1]);
