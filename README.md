@@ -214,32 +214,11 @@ As with Ethash the input and output of the keccak function are fixed and relativ
 Test vectors can be found [in the test vectors file](test-vectors.md#keccak_f800_progpow).
 
 ```cpp
-hash32_t keccak_f800_progpow(hash32_t header, uint64_t seed, hash32_t digest)
+void keccak_f800_progpow(uint32_t* state)
 {
-    uint32_t st[25];
-
-    // Initialization
-    for (int i = 0; i < 25; i++)
-        st[i] = 0;
-
-    // Absorb phase for fixed 18 words of input
-    for (int i = 0; i < 8; i++)
-        st[i] = header.uint32s[i];
-    st[8] = seed;
-    st[9] = seed >> 32;
-    for (int i = 0; i < 8; i++)
-        st[10+i] = digest.uint32s[i];
-
     // keccak_f800 call for the single absorb pass
     for (int r = 0; r < 22; r++)
         keccak_f800_round(st, r);
-
-    // Squeeze phase for fixed 8 words of output
-    hash32_t ret;
-    for (int i=0; i<8; i++)
-        ret.uint32s[i] = st[i];
-
-    return ret;
 }
 ```
 
@@ -418,11 +397,11 @@ void progPowLoop(
 ```
 
 The flow of the overall algorithm is:
-* A keccak hash of the header + nonce to create a seed
-* Use the seed to generate initial mix data
+* A keccak hash of the header + nonce to create a digest of 256 bits
+* Use first two words of digest as seed to generate initial mix data
 * Loop multiple times, each time hashing random loads and random math into the mix data
 * Hash all the mix data into a single 256-bit value
-* A final keccak hash is computed
+* A final keccak hash using carry-over digest from initial data + mix_data final 256 bit value
 * When mining this final value is compared against a `hash32_t` target
 
 ```cpp
@@ -433,13 +412,23 @@ hash32_t progPowHash(
     const uint32_t *dag // gigabyte DAG located in framebuffer - the first portion gets cached
 )
 {
+    uint32_t* state[25] = {0};
+	uint32_t* seed[2];
     uint32_t mix[PROGPOW_LANES][PROGPOW_REGS];
-    hash32_t digest;
+
+    // Absorb phase for initial round of keccak
+    // 1st fill with header data (8 words)
     for (int i = 0; i < 8; i++)
-        digest.uint32s[i] = 0;
+        state[i] = header.uint32s[i];
+    // 2nd fill with nonce (2 words)
+    state[8] = nonce;
+    state[9] = nonce >> 32;
+    // 3rd all remaining elements to zero
+    for (int i = 10; i < 25; i++)
+        state[i] = 0;
 
     // keccak(header..nonce)
-    hash32_t seed_256 = keccak_f800_progpow(header, nonce, digest);
+    hash32_t digest_256 = keccak_f800_progpow(state);
     // endian swap so byte 0 of the hash is the MSB of the value
     uint64_t seed = ((uint64_t)bswap(seed_256.uint32s[0]) << 32) | bswap(seed_256.uint32s[1]);
 
@@ -464,9 +453,16 @@ hash32_t progPowHash(
         digest.uint32s[i] = FNV_OFFSET_BASIS;
     for (int l = 0; l < PROGPOW_LANES; l++)
         digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l]);
+		
+	// Absorb digest into state
+	for (int i = 8; i < 16; i++)
+        state[i] = digest.uint32s[i];
+	
+    for (int i = 16; i < 25; i++)
+        state[i] = 0;
 
-    // keccak(header .. keccak(header..nonce) .. digest);
-    return keccak_f800_progpow(header, seed, digest);
+    // keccak(header .. keccak(digest_256 .. digest);
+    keccak_f800_progpow(state);
 }
 ```
 
@@ -494,7 +490,8 @@ Additional test vectors can be found [in the test vectors file](test-vectors.md#
 
 ## Change History
 
-- 0.9.3 (proposed) - Reduce parameters PERIOD, CNT_MATH, and CNT_CACHE. See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
+- 0.9.4 (proposed) void the [bypass memory hardness](https://github.com/ifdefelse/ProgPOW/issues/51) vulnerability.
+- [0.9.3](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) - Reduce parameters PERIOD, CNT_MATH, and CNT_CACHE.
 - [0.9.2](https://github.com/ifdefelse/ProgPOW/blob/0e39b62deb0c9ab14900fc404fcb19cac70240e1/README.md) - Unique sources for math() and prevent rotation by 0 in merge().  Suggested by [SChernykh](https://github.com/ifdefelse/ProgPOW/issues/19)
 - [0.9.1](https://github.com/ifdefelse/ProgPOW/blob/60bba1c3fdad6a54539fc3e9f05727547de9c58c/README.md) - Shuffle what part of the DAG entry each lane accesses. Suggested by [mbevand](https://github.com/ifdefelse/ProgPOW/pull/13)
 - [0.9.0](https://github.com/ifdefelse/ProgPOW/blob/a3f62349a1513f0393524683f9671cfe17cca895/README.md) - Unique cache address sources, re-tune parameters
