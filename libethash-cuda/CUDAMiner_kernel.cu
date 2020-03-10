@@ -2,6 +2,9 @@
 #define SEARCH_RESULTS 4
 #endif
 
+#define FNV_PRIME 0x1000193
+#define FNV_OFFSET_BASIS 0x811c9dc5
+
 typedef struct {
     uint32_t count;
     struct {
@@ -79,7 +82,7 @@ __device__ __forceinline__ uint32_t cuda_swab32(const uint32_t x)
 
 // Keccak - implemented as a variant of SHAKE
 // The width is 800, with a bitrate of 576, a capacity of 224, and no padding
-__device__ __noinline__ void keccak_f800(uint32_t* st)
+__device__ __forceinline__ void keccak_f800(uint32_t* st)
 {
 
     // Assumes input state has already been filled
@@ -93,7 +96,7 @@ __device__ __noinline__ void keccak_f800(uint32_t* st)
 
 }
 
-#define fnv1a(h, d) (h = (uint32_t(h) ^ uint32_t(d)) * uint32_t(0x1000193))
+#define fnv1a(h, d) (h = (uint32_t(h) ^ uint32_t(d)) * uint32_t(FNV_PRIME))
 
 typedef struct {
     uint32_t z, w, jsr, jcong;
@@ -114,16 +117,16 @@ __device__ __forceinline__ uint32_t kiss99(kiss99_t &st)
     return ((MWC^st.jcong) + st.jsr);
 }
 
-__device__ __forceinline__ void fill_mix(const hash32_t header, uint64_t hash_seed, uint32_t lane_id, uint32_t mix[PROGPOW_REGS])
+__device__ __forceinline__ void fill_mix(uint32_t* hash_seed, uint32_t lane_id, uint32_t mix[PROGPOW_REGS])
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
-    uint32_t fnv_hash = 0x811c9dc5;
+    uint32_t fnv_hash = FNV_OFFSET_BASIS;
     kiss99_t st;
-    st.z = fnv1a(fnv_hash, header.uint32s[0]);
-    st.w = fnv1a(fnv_hash, header.uint32s[1]);
-    st.jsr = fnv1a(fnv_hash, ROTL32(hash_seed, lane_id));
-    st.jcong = fnv1a(fnv_hash, ROTL32(hash_seed >> 32, lane_id));
+    st.z = fnv1a(fnv_hash, hash_seed[0]);
+    st.w = fnv1a(fnv_hash, hash_seed[1]);
+    st.jsr = fnv1a(fnv_hash, lane_id);
+    st.jcong = fnv1a(fnv_hash, lane_id);
     #pragma unroll
     for (int i = 0; i < PROGPOW_REGS; i++)
         mix[i] = kiss99(st);
@@ -156,8 +159,9 @@ progpow_search(
     // Force threads to sync and ensure shared mem is in sync
     __syncthreads();
 
-    uint32_t state[25];  // Keccak's state
-    hash32_t digest;     // Carry-over from mix output
+    uint32_t state[25];     // Keccak's state
+    uint32_t hash_seed[2];  // KISS99 initiator
+    hash32_t digest;        // Carry-over from mix output
 
     // Absorb phase for initial round of keccak
     // 1st fill with header data (8 words)
@@ -180,12 +184,12 @@ progpow_search(
         uint32_t mix[PROGPOW_REGS];
 
         // share the first two words of digest across all lanes
-        uint64_t hash_seed = (uint64_t)state[0] << 32 | state[1];
-        hash_seed = __shfl_sync(0xFFFFFFFF, hash_seed, h, PROGPOW_LANES);
+        hash_seed[0] = __shfl_sync(0xFFFFFFFF, state[0], h, PROGPOW_LANES);
+        hash_seed[1] = __shfl_sync(0xFFFFFFFF, state[1], h, PROGPOW_LANES);
 
         // initialize mix for all lanes using first
         // two words from header_hash
-        fill_mix(header, hash_seed, lane_id, mix);
+        fill_mix(hash_seed, lane_id, mix);
 
         #pragma unroll 1
         for (uint32_t l = 0; l < PROGPOW_CNT_DAG; l++)
@@ -193,7 +197,7 @@ progpow_search(
 
 
         // Reduce mix data to a per-lane 32-bit digest
-        uint32_t digest_lane = 0x811c9dc5;
+        uint32_t digest_lane = FNV_OFFSET_BASIS;
         #pragma unroll
         for (int i = 0; i < PROGPOW_REGS; i++)
             fnv1a(digest_lane, mix[i]);
@@ -202,7 +206,7 @@ progpow_search(
         hash32_t digest_temp;
         #pragma unroll
         for (int i = 0; i < 8; i++)
-            digest_temp.uint32s[i] = 0x811c9dc5;
+            digest_temp.uint32s[i] = FNV_OFFSET_BASIS;
 
         for (int i = 0; i < PROGPOW_LANES; i += 8)
             #pragma unroll
@@ -219,6 +223,7 @@ progpow_search(
     // 2nd subsequent 8 words are carried from digest/mix
     for (int i = 8; i < 16; i++)
         state[i] = digest.uint32s[i];
+
     // 3rd all other elements to zero
     for (int i = 16; i < 25; i++)
         state[i] = 0;
