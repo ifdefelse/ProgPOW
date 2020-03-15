@@ -159,23 +159,31 @@ progpow_search(
     // Force threads to sync and ensure shared mem is in sync
     __syncthreads();
 
-    uint32_t state[25];     // Keccak's state
+    //uint32_t state[25];     // Keccak's state
     uint32_t hash_seed[2];  // KISS99 initiator
     hash32_t digest;        // Carry-over from mix output
 
-    // Absorb phase for initial round of keccak
-    // 1st fill with header data (8 words)
-    for (int i = 0; i < 8; i++)
-        state[i] = header.uint32s[i];
-    // 2nd fill with nonce (2 words)
-    state[8] = nonce;
-    state[9] = nonce >> 32;
-    // 3rd all remaining elements to zero
-    for (int i = 10; i < 25; i++)
-        state[i] = 0;
+    uint32_t state2[8];
 
-    // Run intial keccak round
-    keccak_f800(state);
+    {
+        // Absorb phase for initial round of keccak
+        // 1st fill with header data (8 words)
+        uint32_t state[25];     // Keccak's state
+        for (int i = 0; i < 8; i++)
+            state[i] = header.uint32s[i];
+        // 2nd fill with nonce (2 words)
+        state[8] = nonce;
+        state[9] = nonce >> 32;
+        // 3rd all remaining elements to zero
+        for (int i = 10; i < 25; i++)
+            state[i] = 0;
+
+        // Run intial keccak round
+        keccak_f800(state);
+
+        for (int i = 0; i < 8; i++)
+            state2[i] = state[i];
+    }
 
     // Main loop
     #pragma unroll 1
@@ -184,8 +192,8 @@ progpow_search(
         uint32_t mix[PROGPOW_REGS];
 
         // share the first two words of digest across all lanes
-        hash_seed[0] = __shfl_sync(0xFFFFFFFF, state[0], h, PROGPOW_LANES);
-        hash_seed[1] = __shfl_sync(0xFFFFFFFF, state[1], h, PROGPOW_LANES);
+        hash_seed[0] = __shfl_sync(0xFFFFFFFF, state2[0], h, PROGPOW_LANES);
+        hash_seed[1] = __shfl_sync(0xFFFFFFFF, state2[1], h, PROGPOW_LANES);
 
         // initialize mix for all lanes using first
         // two words from header_hash
@@ -217,6 +225,9 @@ progpow_search(
             digest = digest_temp;
     }
 
+    uint32_t state[25];     // Keccak's state
+    for (int i = 0; i < 8; i++)
+        state[i] = state2[i];
 
     // Absorb phase for last round of keccak (256 bits)
     // 1st initial 8 words of state are kept as carry-over from initial keccak
