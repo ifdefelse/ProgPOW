@@ -168,15 +168,12 @@ progpow_search(
     {
         // Absorb phase for initial round of keccak
         // 1st fill with header data (8 words)
-        uint32_t state[25];     // Keccak's state
+        uint32_t state[25] = { 0x0 };     // Keccak's state initialized to zero
         for (int i = 0; i < 8; i++)
             state[i] = header.uint32s[i];
         // 2nd fill with nonce (2 words)
         state[8] = nonce;
         state[9] = nonce >> 32;
-        // 3rd all remaining elements to zero
-        for (int i = 10; i < 25; i++)
-            state[i] = 0;
 
         // Run intial keccak round
         keccak_f800(state);
@@ -225,7 +222,7 @@ progpow_search(
             digest = digest_temp;
     }
 
-    uint32_t state[25];     // Keccak's state
+    uint32_t state[25] = { 0x0 };     // Keccak's state initialized to zero
 
     // Absorb phase for last round of keccak (256 bits)
     // 1st initial 8 words of state are kept as carry-over from initial keccak
@@ -235,10 +232,6 @@ progpow_search(
     // 2nd subsequent 8 words are carried from digest/mix
     for (int i = 8; i < 16; i++)
         state[i] = digest.uint32s[i - 8];
-
-    // 3rd all other elements to zero
-    for (int i = 16; i < 25; i++)
-        state[i] = 0;
 
     // Run keccak loop
     keccak_f800(state);
