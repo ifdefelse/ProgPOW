@@ -17,6 +17,9 @@
 
 #define HASHES_PER_GROUP (GROUP_SIZE / PROGPOW_LANES)
 
+#define FNV_PRIME 0x1000193
+#define FNV_OFFSET_BASIS 0x811c9dc5
+
 typedef struct
 {
     uint32_t uint32s[32 / sizeof(uint32_t)];
@@ -80,31 +83,19 @@ void keccak_f800_round(uint32_t st[25], const int r)
 // Keccak - implemented as a variant of SHAKE
 // The width is 800, with a bitrate of 576, a capacity of 224, and no padding
 // Only need 64 bits of output for mining
-uint64_t keccak_f800(__constant hash32_t const* g_header, uint64_t seed, hash32_t digest)
+uint64_t keccak_f800(uint32_t* st)
 {
-    uint32_t st[25];
+	// Assumes input state has already been filled
+	// at higher level
 
-    for (int i = 0; i < 25; i++)
-        st[i] = 0;
-    for (int i = 0; i < 8; i++)
-        st[i] = g_header->uint32s[i];
-    st[8] = seed;
-    st[9] = seed >> 32;
-    for (int i = 0; i < 8; i++)
-        st[10+i] = digest.uint32s[i];
-
-    for (int r = 0; r < 21; r++) {
-        keccak_f800_round(st, r);
-    }
-    // last round can be simplified due to partial output
-    keccak_f800_round(st, 21);
-
-    // Byte swap so byte 0 of hash is MSB of result
-    uint64_t res = (uint64_t)st[1] << 32 | st[0];
-    return as_ulong(as_uchar8(res).s76543210);
+	// Complete all 22 rounds as a separate impl to
+	// evaluate only first 8 words is wasteful of regsters
+	for (int r = 0; r < 22; r++) {
+		keccak_f800_round(st, r);
+	}
 }
 
-#define fnv1a(h, d) (h = (h ^ d) * 0x1000193)
+#define fnv1a(h, d) (h = (h ^ d) * FNV_PRIME)
 
 typedef struct {
     uint32_t z, w, jsr, jcong;
@@ -125,14 +116,14 @@ uint32_t kiss99(kiss99_t *st)
     return ((MWC^st->jcong) + st->jsr);
 }
 
-void fill_mix(uint64_t seed, uint32_t lane_id, uint32_t mix[PROGPOW_REGS])
+void fill_mix(uint32_t* seed, uint32_t lane_id, uint32_t* mix)
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
-    uint32_t fnv_hash = 0x811c9dc5;
+    uint32_t fnv_hash = FNV_OFFSET_BASIS;
     kiss99_t st;
-    st.z = fnv1a(fnv_hash, seed);
-    st.w = fnv1a(fnv_hash, seed >> 32);
+    st.z = fnv1a(fnv_hash, seed[0]);
+    st.w = fnv1a(fnv_hash, seed[1]);
     st.jsr = fnv1a(fnv_hash, lane_id);
     st.jcong = fnv1a(fnv_hash, lane_id);
     #pragma unroll
@@ -168,35 +159,63 @@ __kernel void ethash_search(
     const uint32_t group_id = lid / PROGPOW_LANES;
 
     // Load the first portion of the DAG into the cache
-    for (uint32_t word = lid*PROGPOW_DAG_LOADS; word < PROGPOW_CACHE_WORDS; word += GROUP_SIZE*PROGPOW_DAG_LOADS)
+    for (uint32_t word = lid * PROGPOW_DAG_LOADS; word < PROGPOW_CACHE_WORDS;
+         word += GROUP_SIZE * PROGPOW_DAG_LOADS)
     {
-        dag_t load = g_dag[word/PROGPOW_DAG_LOADS];
-        for (int i = 0; i<PROGPOW_DAG_LOADS; i++)
+        dag_t load = g_dag[word / PROGPOW_DAG_LOADS];
+        for (int i = 0; i < PROGPOW_DAG_LOADS; i++)
             c_dag[word + i] = load.s[i];
     }
 
-    hash32_t digest;
-    for (int i = 0; i < 8; i++)
-        digest.uint32s[i] = 0;
-    // keccak(header..nonce)
-    uint64_t seed = keccak_f800(g_header, start_nonce + gid, digest);
-
+	// Sync threads so shared mem is in sync
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    #pragma unroll 1
+	uint32_t hash_seed[2];  // KISS99 initiator
+	hash32_t digest;        // Carry-over from mix output
+	uint32_t state2[8];
+
+	{
+
+        uint32_t state[25] = {0x0};  // Keccak's state initialized to zero
+
+        // Absorb phase for initial round of keccak
+        // 1st fill with header data (8 words)
+        for (int i = 0; i < 8; i++)
+            state[i] = header.uint32s[i];
+        // 2nd fill with nonce (2 words)
+        state[8] = nonce;
+        state[9] = nonce >> 32;
+
+		// 3rd apply input constraints
+		state[10] = keccakf_rndc[0];
+		state[18] = keccakf_rndc[6];
+
+        // Run intial keccak round
+        keccak_f800(state);
+
+		for (int i = 0; i < 8; i++)
+			state2[i] = state[i];
+    }
+
+
+#pragma unroll 1
     for (uint32_t h = 0; h < PROGPOW_LANES; h++)
     {
         uint32_t mix[PROGPOW_REGS];
 
         // share the hash's seed across all lanes
-        //uint64_t hash_seed = __shfl_sync(0xFFFFFFFF, seed, h, PROGPOW_LANES);
-        if (lane_id == h)
-            share[group_id].uint64s[0] = seed;
+		if (lane_id == h)
+		{
+			share[group_id].uint32s[0] = state2[0];
+			share[group_id].uint32s[1] = state2[1];
+		}
+
         barrier(CLK_LOCAL_MEM_FENCE);
-        uint64_t hash_seed = share[group_id].uint64s[0];
+
+        //uint64_t hash_seed = share[group_id].uint64s[0];
 
         // initialize mix for all lanes
-        fill_mix(hash_seed, lane_id, mix);
+        fill_mix(share[group_id].uint32s, lane_id, mix);
 
         // Apparently, no unrolling ("#pragma unroll 1") often results in
         // miscompiles with AMD OpenCL, so use at least 2
@@ -205,7 +224,7 @@ __kernel void ethash_search(
             progPowLoop(l, mix, g_dag, c_dag, share[0].uint64s, hack_false);
 
         // Reduce mix data to a per-lane 32-bit digest
-        uint32_t mix_hash = 0x811c9dc5;
+        uint32_t mix_hash = FNV_OFFSET_BASIS;
         #pragma unroll
         for (int i = 0; i < PROGPOW_REGS; i++)
             fnv1a(mix_hash, mix[i]);
@@ -213,7 +232,7 @@ __kernel void ethash_search(
         // Reduce all lanes to a single 256-bit digest
         hash32_t digest_temp;
         for (int i = 0; i < 8; i++)
-            digest_temp.uint32s[i] = 0x811c9dc5;
+            digest_temp.uint32s[i] = FNV_OFFSET_BASIS;
         share[group_id].uint32s[lane_id] = mix_hash;
         barrier(CLK_LOCAL_MEM_FENCE);
         #pragma unroll
@@ -223,8 +242,34 @@ __kernel void ethash_search(
             digest = digest_temp;
     }
 
+	uint64_t result;
+
+	{
+		uint32_t state[25] = { 0x0 };     // Keccak's state initialized to zero
+
+		// Absorb phase for last round of keccak (256 bits)
+		// 1st initial 8 words of state are kept as carry-over from initial keccak
+		for (int i = 0; i < 8; i++)
+			state[i] = state2[i];
+
+		// 2nd subsequent 8 words are carried from digest/mix
+		for (int i = 8; i < 16; i++)
+			state[i] = digest.uint32s[i - 8];
+
+		// 3rd apply input constraints
+		state[17] = keccakf_rndc[0];
+		state[24] = keccakf_rndc[6];
+
+		// Run keccak loop
+		keccak_f800(state);
+
+		uint64_t res = (uint64_t)state[1] << 32 | state[0];
+		result = as_ulong(as_uchar8(res).s76543210);
+
+	}
+
     // keccak(header .. keccak(header..nonce) .. digest);
-    if (keccak_f800(g_header, seed, digest) < target)
+    if (result <= target)
     {
         uint slot = atomic_inc(&g_output[0]) + 1;
         if(slot < MAX_OUTPUTS)
@@ -376,25 +421,25 @@ static void keccak_f1600_round(uint2* a, uint r)
 	t[20] = ROL2(a[2], 62);
 	t[5]  = ROL2(a[3], 28);
 	t[15] = ROL2(a[4], 27);
-	
+
 	t[16] = ROL2(a[5], 36);
 	t[1]  = ROL2(a[6], 44);
 	t[11] = ROL2(a[7], 6);
 	t[21] = ROL2(a[8], 55);
 	t[6]  = ROL2(a[9], 20);
-	
+
 	t[7]  = ROL2(a[10], 3);
 	t[17] = ROL2(a[11], 10);
 	t[2]  = ROL2(a[12], 43);
 	t[12] = ROL2(a[13], 25);
 	t[22] = ROL2(a[14], 39);
-	
+
 	t[23] = ROL2(a[15], 41);
 	t[8]  = ROL2(a[16], 45);
 	t[18] = ROL2(a[17], 15);
 	t[3]  = ROL2(a[18], 21);
 	t[13] = ROL2(a[19], 8);
-	
+
 	t[14] = ROL2(a[20], 18);
 	t[24] = ROL2(a[21], 2);
 	t[9]  = ROL2(a[22], 61);
@@ -419,7 +464,7 @@ static void keccak_f1600_no_absorb(uint2* a, uint out_size, uint isolate)
 	// better with surrounding code, however I haven't done this
 	// without causing the AMD compiler to blow up the VGPR usage.
 
-	
+
 	//uint o = 25;
 	for (uint r = 0; r < 24;)
 	{
@@ -435,8 +480,8 @@ static void keccak_f1600_no_absorb(uint2* a, uint out_size, uint isolate)
 			keccak_f1600_round(a, r++);
 			//if (r == 23) o = out_size;
 		}
-	} 
-	
+	}
+
 
 	// final round optimised for digest size
 	//keccak_f1600_round(a, 23, out_size);
