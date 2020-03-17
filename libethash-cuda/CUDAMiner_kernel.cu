@@ -226,14 +226,15 @@ progpow_search(
     }
 
     uint32_t state[25];     // Keccak's state
-    for (int i = 0; i < 8; i++)
-        state[i] = state2[i];
 
     // Absorb phase for last round of keccak (256 bits)
     // 1st initial 8 words of state are kept as carry-over from initial keccak
+    for (int i = 0; i < 8; i++)
+        state[i] = state2[i];
+
     // 2nd subsequent 8 words are carried from digest/mix
     for (int i = 8; i < 16; i++)
-        state[i] = digest.uint32s[i];
+        state[i] = digest.uint32s[i - 8];
 
     // 3rd all other elements to zero
     for (int i = 16; i < 25; i++)
