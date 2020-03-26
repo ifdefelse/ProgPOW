@@ -116,7 +116,7 @@ uint32_t kiss99(kiss99_t *st)
     return ((MWC^st->jcong) + st->jsr);
 }
 
-void fill_mix(uint32_t* seed, uint32_t lane_id, uint32_t* mix)
+void fill_mix(local uint32_t* seed, uint32_t lane_id, uint32_t* mix)
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
