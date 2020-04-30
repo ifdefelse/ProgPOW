@@ -549,6 +549,7 @@ Additional test vectors can be found [in the test vectors file](test-vectors.md#
 
 ## Change History
 
+
 - 0.9.4 (current) - Patch the [bypass memory hardness](https://github.com/ifdefelse/ProgPOW/issues/51) vulnerability.
 - [0.9.3](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.3) - Reduce parameters PERIOD, CNT_MATH, and CNT_CACHE. See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
 - [0.9.2](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.2) - Unique sources for math() and prevent rotation by 0 in merge().  Suggested by [SChernykh](https://github.com/ifdefelse/ProgPOW/issues/19)
