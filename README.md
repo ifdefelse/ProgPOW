@@ -550,11 +550,11 @@ Additional test vectors can be found [in the test vectors file](test-vectors.md#
 ## Change History
 
 - 0.9.4 (current) - Patch the [bypass memory hardness](https://github.com/ifdefelse/ProgPOW/issues/51) vulnerability.
-- [0.9.3](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) - Reduce parameters PERIOD, CNT_MATH, and CNT_CACHE.
-- [0.9.2](https://github.com/ifdefelse/ProgPOW/blob/0e39b62deb0c9ab14900fc404fcb19cac70240e1/README.md) - Unique sources for math() and prevent rotation by 0 in merge().  Suggested by [SChernykh](https://github.com/ifdefelse/ProgPOW/issues/19)
-- [0.9.1](https://github.com/ifdefelse/ProgPOW/blob/60bba1c3fdad6a54539fc3e9f05727547de9c58c/README.md) - Shuffle what part of the DAG entry each lane accesses. Suggested by [mbevand](https://github.com/ifdefelse/ProgPOW/pull/13)
-- [0.9.0](https://github.com/ifdefelse/ProgPOW/blob/a3f62349a1513f0393524683f9671cfe17cca895/README.md) - Unique cache address sources, re-tune parameters
-- [0.8.0](https://github.com/ifdefelse/ProgPOW/blob/620b4c7aafe60391f863372814d7517e94386379/README.md) - Original spec
+- [0.9.3](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.3) - Reduce parameters PERIOD, CNT_MATH, and CNT_CACHE. See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
+- [0.9.2](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.2) - Unique sources for math() and prevent rotation by 0 in merge().  Suggested by [SChernykh](https://github.com/ifdefelse/ProgPOW/issues/19)
+- [0.9.1](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.1) - Shuffle what part of the DAG entry each lane accesses. Suggested by [mbevand](https://github.com/ifdefelse/ProgPOW/pull/13)
+- [0.9.0](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.0) - Unique cache address sources, re-tune parameters
+- [0.8.0](https://github.com/ifdefelse/ProgPOW/tree/spec-0.8.0) - Original spec
 
 ## License
 
