@@ -175,7 +175,7 @@ progpow_search(
         state[8] = nonce;
         state[9] = nonce >> 32;
 
-        // 3rd apply input constraints
+        // 3rd apply padding
         state[10] = keccakf_rndc[0];
         state[18] = keccakf_rndc[6];
 
@@ -240,7 +240,7 @@ progpow_search(
         for (int i = 8; i < 16; i++)
             state[i] = digest.uint32s[i - 8];
 
-        // 3rd apply input constraints
+        // 3rd apply padding
         state[17] = keccakf_rndc[0];
         state[24] = keccakf_rndc[6];
 
