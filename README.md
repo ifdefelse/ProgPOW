@@ -111,7 +111,26 @@ Ethash requires external memory due to the large size of the DAG.  However that 
 
 ## ProgPoW Algorithm Walkthrough
 
-The DAG is generated exactly as in Ethash.  All the parameters (epoch length, DAG size, etc) are unchanged.  See the original [Ethash](https://github.com/ethereum/wiki/wiki/Ethash) spec for details on generating the DAG.
+Up to release 0.9.3 the DAG is generated exactly as in Ethash.  All the parameters (epoch length, DAG size, etc) are unchanged.  See the original [Ethash](https://github.com/ethereum/wiki/wiki/Ethash) spec for details on generating the DAG.
+
+Release 0.9.3 has been software and hardware audited:
+* [Least Authority — ProgPoW Software Audit PDF](https://leastauthority.com/static/publications/Least%20Authority%20-%20ProgPow%20Algorithm%20Final%20Audit%20Report.pdf)
+* [Bob Rao - ProgPoW Hardware Audit PDF](https://github.com/ethereum-cat-herders/progpow-audit/raw/master/Bob%20Rao%20-%20ProgPOW%20Hardware%20Audit%20Report%20Final.pdf)
+
+Following the suggestion expressed by Least Authority in their findings, new proposed release 0.9.4 introduces a tweak in DAG generation in order to mitigate the possibility of a "Light Evaluation" attack.
+This change implies the modification of `ETHASH_DATASET_PARENTS` from a value of 256 to the new value of 512. Due to this the DAG memory file used by ProgPoW is no more compatible with the one used by Ethash (epoch lenght and size increase ratio remain the same though).
+
+After the audits release a clever finding by [Kik](https://github.com/kik/) disclosed an exploitable condition to [bypass ProgPoW memory hardness](https://github.com/kik/progpow-exploit). Worth to mention the exploit would require the availability of a customized node able to accept modified block headers by the miner.
+Purpose of this new spec release is to patch the condition modifying the input state of the last keccak pass so it changes from :
+* header (256 bits) +
+* seed for mix initiator (64 bits) +
+* mix from main loop (256 bits) 
+* no padding
+to
+* digest from initial keccak (256 bits) +
+* mix from main loop (256 bits) +
+* padding
+thus widening the constraint to target in keccak [brute force keccak linear searches](https://github.com/kik/progpow-exploit) from 64 to 256 bits.
 
 ProgPoW can be tuned using the following parameters.  The proposed settings have been tuned for a range of existing, commodity GPUs:
 
@@ -124,21 +143,26 @@ ProgPoW can be tuned using the following parameters.  The proposed settings have
 * `PROGPOW_CNT_CACHE`: The number of cache accesses per loop
 * `PROGPOW_CNT_MATH`: The number of math operations per loop
 
-The value of these parameters has been tweaked between version 0.9.2 (live on the Gangnam testnet) and 0.9.3 (proposed for Ethereum adoption).  See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
+The value of these parameters has been tweaked between version 0.9.2 (live on the Gangnam testnet) and 0.9.3 (proposed for [Ethereum adoption](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1057.md)).  See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
+Release 0.9.4 keeps the same tunables of 0.9.3 and includes the tweak for DAG generation.
 
-| Parameter             | 0.9.2 | 0.9.3 |
-|-----------------------|-------|-------|
-| `PROGPOW_PERIOD`      | `50`  | `10`  |
-| `PROGPOW_LANES`       | `16`  | `16`  |
-| `PROGPOW_REGS`        | `32`  | `32`  |
-| `PROGPOW_DAG_LOADS`   | `4`   | `4`   |
-| `PROGPOW_CACHE_BYTES` | `16x1024` | `16x1024` |
-| `PROGPOW_CNT_DAG`     | `64`  | `64`  |
-| `PROGPOW_CNT_CACHE`   | `12`  | `11`  |
-| `PROGPOW_CNT_MATH`    | `20`  | `18`  |
+| Parameter             | 0.9.2 | 0.9.3 | 0.9.4 |
+|-----------------------|-------|-------|-------|
+| `PROGPOW_PERIOD`      | `50`  | `10`  |  `10` |
+| `PROGPOW_LANES`       | `16`  | `16`  |  `16` |
+| `PROGPOW_REGS`        | `32`  | `32`  |  `32` |
+| `PROGPOW_DAG_LOADS`   | `4`   | `4`   |  `4`  |
+| `PROGPOW_CACHE_BYTES` | `16x1024` | `16x1024` | `16x1024` |
+| `PROGPOW_CNT_DAG`     | `64`  | `64`  | `64`  |
+| `PROGPOW_CNT_CACHE`   | `12`  | `11`  | `11`  |
+| `PROGPOW_CNT_MATH`    | `20`  | `18`  | `18`  |
+
+| DAG Parameter            | 0.9.2 | 0.9.3 | 0.9.4 |
+|--------------------------|-------|-------|-------|
+| `ETHASH_DATASET_PARENTS` | `256` | `256` | `512` |
 
 
-The random program changes every `PROGPOW_PERIOD` blocks (default `50`, roughly 12.5 minutes) to ensure the hardware executing the algorithm is fully programmable.  If the program only changed every DAG epoch (roughly 5 days) certain miners could have time to develop hand-optimized versions of the random sequence, giving them an undue advantage.
+The random program changes every `PROGPOW_PERIOD` blocks (default `10`, roughly 2 minutes) to ensure the hardware executing the algorithm is fully programmable.  If the program only changed every DAG epoch (roughly 5 days) certain miners could have time to develop hand-optimized versions of the random sequence, giving them an undue advantage.
 
 Sample code is written in C++, this should be kept in mind when evaluating the code in the specification.
 
@@ -196,13 +220,14 @@ void fill_mix(
 {
     // Use FNV to expand the per-warp seed to per-lane
     // Use KISS to expand the per-lane seed to fill mix
+    uint32_t fnv_hash = FNV_OFFSET_BASIS;
     kiss99_t st;
-    st.z = fnv1a(FNV_OFFSET_BASIS, seed);
-    st.w = fnv1a(st.z, seed >> 32);
-    st.jsr = fnv1a(st.w, lane_id);
-    st.jcong = fnv1a(st.jsr, lane_id);
+    st.z = fnv1a(fnv_hash, seed);
+    st.w = fnv1a(fnv_hash, seed >> 32);
+    st.jsr = fnv1a(fnv_hash, lane_id);
+    st.jcong = fnv1a(fnv_hash, lane_id);
     for (int i = 0; i < PROGPOW_REGS; i++)
-            mix[i] = kiss99(st);
+        mix[i] = kiss99(st);
 }
 ```
 
@@ -210,25 +235,9 @@ Like Ethash Keccak is used to seed the sequence per-nonce and to produce the fin
 
 As with Ethash the input and output of the keccak function are fixed and relatively small.  This means only a single "absorb" and "squeeze" phase are required.  For a pseudo-code implementation of the `keccak_f800_round` function see the `Round[b](A,RC)` function in the "Pseudo-code description of the permutations" section of the [official Keccak specs](https://keccak.team/keccak_specs_summary.html).
 
-Test vectors can be found [in the test vectors file](test-vectors.md#keccak_f800_progpow).
-
 ```cpp
-hash32_t keccak_f800_progpow(hash32_t header, uint64_t seed, hash32_t digest)
+hash32_t keccak_f800_progpow(uint32_t* state)
 {
-    uint32_t st[25];
-
-    // Initialization
-    for (int i = 0; i < 25; i++)
-        st[i] = 0;
-
-    // Absorb phase for fixed 18 words of input
-    for (int i = 0; i < 8; i++)
-        st[i] = header.uint32s[i];
-    st[8] = seed;
-    st[9] = seed >> 32;
-    for (int i = 0; i < 8; i++)
-        st[10+i] = digest.uint32s[i];
-
     // keccak_f800 call for the single absorb pass
     for (int r = 0; r < 22; r++)
         keccak_f800_round(st, r);
@@ -244,7 +253,7 @@ hash32_t keccak_f800_progpow(hash32_t header, uint64_t seed, hash32_t digest)
 
 The inner loop uses FNV and KISS99 to generate a random sequence from the `prog_seed`.  This random sequence determines which mix state is accessed and what random math is performed.
 
-Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (50 blocks or about 12.5 minutes) it is expected that while mining `progPowLoop` will be evaluated on the CPU to generate source code for that period's sequence.  The source code will be compiled on the CPU before running on the GPU.  You can see an example sequence and generated source code in [kernel.cu](test/kernel.cu).
+Since the `prog_seed` changes only once per `PROGPOW_PERIOD` (10 blocks or about 2 minutes) it is expected that while mining `progPowLoop` will be evaluated on the CPU to generate source code for that period's sequence.  The source code will be compiled on the CPU before running on the GPU.  You can see an example sequence and generated source code in [kernel.cu](test/kernel.cu).
 
 Test vectors can be found [in the test vectors file](test-vectors.md#progPowInit).
 
@@ -417,30 +426,52 @@ void progPowLoop(
 ```
 
 The flow of the overall algorithm is:
-* A keccak hash of the header + nonce to create a seed
-* Use the seed to generate initial mix data
+* A keccak hash of the header + nonce to create a digest of 256 bits from keccak_f800 (padding is consistent with custom one in ethash)
+* Use first two words of digest as seed to generate initial mix data
 * Loop multiple times, each time hashing random loads and random math into the mix data
 * Hash all the mix data into a single 256-bit value
-* A final keccak hash is computed
+* A final keccak hash using carry-over digest from initial data + mix_data final 256 bit value (padding is consistent with custom one in ethash)
 * When mining this final value is compared against a `hash32_t` target
 
 ```cpp
 hash32_t progPowHash(
-    const uint64_t prog_seed, // value is (block_number/PROGPOW_PERIOD)
+    const uint64_t prog_seed,    // value is (block_number/PROGPOW_PERIOD)
     const uint64_t nonce,
     const hash32_t header,
-    const uint32_t *dag // gigabyte DAG located in framebuffer - the first portion gets cached
+    const uint32_t *dag          // gigabyte DAG located in framebuffer - the first portion gets cached
 )
 {
-    uint32_t mix[PROGPOW_LANES][PROGPOW_REGS];
-    hash32_t digest;
-    for (int i = 0; i < 8; i++)
-        digest.uint32s[i] = 0;
+    hash32_t hash_init;
+    hash32_t hash_final;
 
-    // keccak(header..nonce)
-    hash32_t seed_256 = keccak_f800_progpow(header, nonce, digest);
-    // endian swap so byte 0 of the hash is the MSB of the value
-    uint64_t seed = ((uint64_t)bswap(seed_256.uint32s[0]) << 32) | bswap(seed_256.uint32s[1]);
+    uint32_t mix[PROGPOW_LANES][PROGPOW_REGS];
+
+    /*  
+        ========================================
+        Absorb phase for initial keccak pass
+        ========================================
+    */
+
+    {
+        uint32_t state[25] = {0x0};
+        // 1st fill with header data (8 words)
+        for (int i = 0; i < 8; i++)
+            state[i] = header.uint32s[i];
+
+        // 2nd fill with nonce (2 words)
+        state[8] = nonce;
+        state[9] = nonce >> 32;
+
+        // 3rd apply padding
+        state[10] = 0x00000001;
+        state[18] = 0x80008081;
+
+        // keccak(header..nonce)
+        hash_init = keccak_f800_progpow(state);
+
+        // get the seed to initialize mix
+        seed = ((uint64_t)hash_init.uint32s[1] << 32) | hash_init.uint32s[0]);
+	}
 
     // initialize mix for all lanes
     for (int l = 0; l < PROGPOW_LANES; l++)
@@ -458,34 +489,59 @@ hash32_t progPowHash(
         for (int i = 0; i < PROGPOW_REGS; i++)
             digest_lane[l] = fnv1a(digest_lane[l], mix[l][i]);
     }
+
     // Reduce all lanes to a single 256-bit digest
     for (int i = 0; i < 8; i++)
         digest.uint32s[i] = FNV_OFFSET_BASIS;
     for (int l = 0; l < PROGPOW_LANES; l++)
         digest.uint32s[l%8] = fnv1a(digest.uint32s[l%8], digest_lane[l]);
 
-    // keccak(header .. keccak(header..nonce) .. digest);
-    return keccak_f800_progpow(header, seed, digest);
+    /*  
+        ========================================
+        Absorb phase for final keccak pass
+        ========================================
+    */
+
+    {
+        uint32_t state[25] = {0x0};
+
+        // 1st fill with hash_init (8 words)
+        for (int i = 0; i < 8; i++)
+            state[i] = hash_init.uint32s[i];
+
+        // 2nd fill with digest from main loop
+        for (int i = 8; i < 16; i++)
+            state[i] = digest.uint32s[i - 8];
+
+        // 3rd apply padding
+        state[17] = 0x00000001;
+        state[24] = 0x80008081;
+
+        // keccak(header..nonce)
+        hash_final = keccak_f800_progpow(state);
+	}
+
+    // Compare hash final to target
+    [...]
+
 }
 ```
 
-
 ## Example / Testcase
 
-For ProgPoW 0.9.2:
+For ProgPoW 0.9.4:
 
-The random sequence generated for block 30,000 (prog_seed 600) can been seen in [kernel.cu](test/kernel.cu).
+The random sequence generated for block 30,000 (prog_seed 3,000) can been seen in [kernel.cu](test/kernel.cu).
 
 The algorithm run on block 30,000 produces the following digest and result:
 ```
-header ffeeddccbbaa9988776655443322110000112233445566778899aabbccddeeff
-nonce 123456789abcdef0
-
-digest: 11f19805c58ab46610ff9c719dcf0a5f18fa2f1605798eef770c47219274767d
-result: 5b7ccd472dbefdd95b895cac8ece67ff0deb5a6bd2ecc6e162383d00c3728ece
+Header     : 0xffeeddccbbaa9988776655443322110000112233445566778899aabbccddeeff
+Nonce      : 0x123456789abcdef0
+Hash init  : 0xee304846ddd0a47b98179e96b60ec5ceeae2727834367e593de780e3e6d1892f
+Mix seed   : 0x7ba4d0dd464830ee
+Mix hash   : 0x493c13e9807440571511b561132834bbd558dddaa3b70c09515080a6a1aff6d0
+Hash final : 0x46b72b75f238bea3fcfd227e0027dc173dceaa1fb71744bd3d5e030ed2fed053
 ```
-
-A full run showing some intermediate values can be seen in [result.log](test/result.log)
 
 Additional test vectors can be found [in the test vectors file](test-vectors.md#progPowHash).
 
@@ -493,6 +549,8 @@ Additional test vectors can be found [in the test vectors file](test-vectors.md#
 
 ## Change History
 
+
+- 0.9.4 (current) - Patch the [bypass memory hardness](https://github.com/ifdefelse/ProgPOW/issues/51) vulnerability.
 - [0.9.3](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.3) - Reduce parameters PERIOD, CNT_MATH, and CNT_CACHE. See [this medium post](https://medium.com/@ifdefelse/progpow-progress-da5bb31a651b) for details.
 - [0.9.2](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.2) - Unique sources for math() and prevent rotation by 0 in merge().  Suggested by [SChernykh](https://github.com/ifdefelse/ProgPOW/issues/19)
 - [0.9.1](https://github.com/ifdefelse/ProgPOW/tree/spec-0.9.1) - Shuffle what part of the DAG entry each lane accesses. Suggested by [mbevand](https://github.com/ifdefelse/ProgPOW/pull/13)
