@@ -1,0 +1,147 @@
+diff --git a/libethash-cl/CLMiner.cpp b/libethash-cl/CLMiner.cpp
+index 9cc5961..9460342 100644
+--- a/libethash-cl/CLMiner.cpp
++++ b/libethash-cl/CLMiner.cpp
+@@ -322,7 +322,8 @@ void CLMiner::workLoop()
+ 				assert(target > 0);
+ 
+ 				// Update header constant buffer.
+-				m_queue.enqueueWriteBuffer(m_header, CL_FALSE, 0, w.header.size, w.header.data());
++				//m_queue.enqueueWriteBuffer(m_header, CL_FALSE, 0, w.header.size, w.header.data());
++				m_queue.enqueueWriteBuffer(m_header, CL_FALSE, 0, 32, h256("ffeeddccbbaa9988776655443322110000112233445566778899aabbccddeeff").data());
+ 				m_queue.enqueueWriteBuffer(m_searchBuffer, CL_FALSE, 0, sizeof(c_zero), &c_zero);
+ 
+ 				m_searchKernel.setArg(0, m_searchBuffer);  // Supply output buffer to kernel.
+@@ -337,6 +338,8 @@ void CLMiner::workLoop()
+ 				else
+ 					startNonce = get_start_nonce();
+ 
++				startNonce = 0x123456789abcdef0ULL;
++
+ 				clswitchlog << "Switch time"
+ 					<< std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - workSwitchStart).count()
+ 					<< "ms.";
+diff --git a/libethash-cl/CLMiner_kernel.cl b/libethash-cl/CLMiner_kernel.cl
+index 9a9b7e8..7c7f234 100644
+--- a/libethash-cl/CLMiner_kernel.cl
++++ b/libethash-cl/CLMiner_kernel.cl
+@@ -223,6 +223,21 @@ __kernel void ethash_search(
+             digest = digest_temp;
+     }
+ 
++    if (gid == 0)
++    {
++        uint b[32];
++        for (int i = 0; i < 32; i++)
++            b[i] = (digest.uint32s[i / 4] >> (8 * (i % 4))) & 0xff;
++        printf("Nonce = %16lx Digest = "
++            "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x"
++            "%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\n",
++            nonce,
++            b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
++            b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15],
++            b[16], b[17], b[18], b[19], b[20], b[21], b[22], b[23],
++            b[24], b[25], b[26], b[27], b[28], b[29], b[30], b[31]);
++    }
++
+     // keccak(header .. keccak(header..nonce) .. digest);
+     if (keccak_f800(g_header, seed, digest) < target)
+     {
+diff --git a/libethash-cuda/CUDAMiner.cpp b/libethash-cuda/CUDAMiner.cpp
+index 59e837b..c4f8455 100644
+--- a/libethash-cuda/CUDAMiner.cpp
++++ b/libethash-cuda/CUDAMiner.cpp
+@@ -555,6 +555,31 @@ void CUDAMiner::compileKernel(
+ 	NVRTC_SAFE_CALL(nvrtcDestroyProgram(&prog));
+ }
+ 
++static uint32_t bswap(uint32_t a)
++{
++	a = (a << 16) | (a >> 16);
++	return ((a & 0x00ff00ff) << 8) | ((a >> 8) & 0x00ff00ff);
++}
++
++static void unhex(hash32_t *dst, const char *src)
++{
++	const char *p = src;
++	uint32_t *q = dst->uint32s;
++	uint32_t v = 0;
++
++	while (*p && q <= &dst->uint32s[7]) {
++		if (*p >= '0' && *p <= '9')
++			v |= *p - '0';
++		else if (*p >= 'a' && *p <= 'f')
++			v |= *p - ('a' - 10);
++		else
++			break;
++		if (!((++p - src) & 7))
++			*q++ = bswap(v);
++		v <<= 4;
++	}
++}
++
+ void CUDAMiner::search(
+ 	uint8_t const* header,
+ 	uint64_t target,
+@@ -602,6 +627,13 @@ void CUDAMiner::search(
+ 		}
+ 	}
+ 	const uint32_t batch_size = s_gridSize * s_blockSize;
++
++	m_starting_nonce = 0x123456789abcdef0ULL;
++	m_current_nonce = m_starting_nonce - batch_size;
++	unhex(&m_current_header, "ffeeddccbbaa9988776655443322110000112233445566778899aabbccddeeff");
++	m_current_target = -1;
++	s_noeval = true;
++
+ 	while (true)
+ 	{
+ 		m_current_index++;
+@@ -624,7 +656,11 @@ void CUDAMiner::search(
+ 				for (unsigned int j = 0; j < found_count; j++) {
+ 					nonces[j] = nonce_base + buffer->result[j].gid;
+ 					if (s_noeval)
++					{
+ 						memcpy(mixes[j].data(), (void *)&buffer->result[j].mix, sizeof(buffer->result[j].mix));
++						if (nonces[j] == m_starting_nonce)
++							cout << "Digest = " << mixes[j] << "\n";
++					}
+ 				}
+ 			}
+ 		}
+diff --git a/libethash-cuda/CUDAMiner_cuda.h b/libethash-cuda/CUDAMiner_cuda.h
+index a0629d5..fe8a9a7 100644
+--- a/libethash-cuda/CUDAMiner_cuda.h
++++ b/libethash-cuda/CUDAMiner_cuda.h
+@@ -10,7 +10,7 @@
+ // one solution per stream hash calculation
+ // Leave room for up to 4 results. A power
+ // of 2 here will yield better CUDA optimization
+-#define SEARCH_RESULTS 4
++#define SEARCH_RESULTS 0x10000
+ 
+ typedef struct {
+ 	uint32_t count;
+@@ -21,9 +21,10 @@ typedef struct {
+ 	} result[SEARCH_RESULTS];
+ } search_results;
+ 
+-typedef struct
++typedef union
+ {
+ 	uint4 uint4s[32 / sizeof(uint4)];
++	uint32_t uint32s[32 / sizeof(uint32_t)];
+ } hash32_t;
+ 
+ typedef struct
+diff --git a/libethash-cuda/CUDAMiner_kernel.cu b/libethash-cuda/CUDAMiner_kernel.cu
+index 3f7666d..a33f14b 100644
+--- a/libethash-cuda/CUDAMiner_kernel.cu
++++ b/libethash-cuda/CUDAMiner_kernel.cu
+@@ -1,5 +1,5 @@
+ #ifndef SEARCH_RESULTS
+-#define SEARCH_RESULTS 4
++#define SEARCH_RESULTS 0x10000
+ #endif
+ 
+ typedef struct {
