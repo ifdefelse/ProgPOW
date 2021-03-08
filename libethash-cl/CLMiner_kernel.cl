@@ -181,7 +181,7 @@ __kernel void ethash_search(
         // Absorb phase for initial round of keccak
         // 1st fill with header data (8 words)
         for (int i = 0; i < 8; i++)
-            state[i] = header->uint32s[i];
+            state[i] = g_header->uint32s[i];
         // 2nd fill with nonce (2 words)
         state[8] = nonce;
         state[9] = nonce >> 32;
@@ -263,7 +263,7 @@ __kernel void ethash_search(
 		// Run keccak loop
 		keccak_f800(state);
 
-		int64_t res = (uint64_t)state[1] << 32 | state[0];
+		uint64_t res = (uint64_t)state[1] << 32 | state[0];
 		result = as_ulong(as_uchar8(res).s76543210);
 	}
 
